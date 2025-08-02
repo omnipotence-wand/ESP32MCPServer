@@ -1,6 +1,9 @@
 #include "ac.h"
 #include <Arduino.h>
 #include <Wire.h>
+#include "uart.h"
+#include "xl9555.h"
+#include "spilcd.h"
 
 // 构造函数
 AirConditioner::AirConditioner() {
@@ -141,62 +144,28 @@ bool AirConditioner::setFromJSON(const String& jsonStr) {
 
 // 初始化LCD
 bool AirConditioner::initLCD() {
-    if (lcd != nullptr) {
-        delete lcd; // 清理之前的LCD实例
-    }
-    uint8_t address = 0x20; // 默认I2C地址
-    int cols = 240; // 默认列数     
-    int rows = 320; // 默认行数
-    Serial.printf("正在初始化LCD - 地址: 0x%02X, 尺寸: %dx%d\n", address, cols, rows);
-    
-    // 首先扫描I2C设备
-    Wire.begin();
-    Wire.beginTransmission(address);
-    uint8_t error = Wire.endTransmission();
-    
-    if (error != 0) {
-        Serial.printf("❌ I2C设备未找到，地址: 0x%02X (错误代码: %d)\n", address, error);
-        Serial.println("请检查LCD连接:");
-        Serial.println("  VCC → 5V 或 3.3V");
-        Serial.println("  GND → GND");
-        Serial.println("  SDA → GPIO21");
-        Serial.println("  SCL → GPIO22");
-        return false;
-    }
-    
-    Serial.printf("✅ I2C设备已找到，地址: 0x%02X\n", address);
-    
-    // 创建LCD实例
-    lcd = new LiquidCrystal_I2C(address, cols, rows);
-    
-    // 初始化LCD
-    lcd->init();
-    delay(100);
-    
-    // 开启背光
-    lcd->backlight();
-    delay(100);
-    
-    // 测试LCD显示
-    lcd->clear();
-    delay(50);
-    
-    lcd->setCursor(0, 0);
-    lcd->print("AC System Init");
-    lcd->setCursor(0, 1);
-    lcd->print("Please wait...");
-    
-    Serial.println("✅ LCD显示测试完成");
-    delay(2000);
-    
-    lcdEnabled = true;
-    lastUpdate = 0; // 强制立即更新
-    
-    Serial.printf("✅ LCD初始化完成 - 地址: 0x%02X, 尺寸: %dx%d\n", address, cols, rows);
-    
-    // 显示初始状态
-    forceLCDUpdate();
-    return true;
+    uart_init(0, 115200);   /* 串口0初始化 */
+    xl9555_init();          /* IO扩展芯片初始化 */
+    lcd_init();             /* LCD初始化 */
+
+    /* 刷屏测试 */
+    lcd_clear(BLACK);
+    delay(500);
+    lcd_clear(RED);
+    delay(500);
+    lcd_clear(GREEN);
+    delay(500);
+    lcd_clear(BLUE);
+    delay(500);
+    lcd_clear(YELLOW);
+    delay(500);
+    lcd_clear(WHITE);
+    delay(500);
+                     /* LCD显示ALIENTEK图片 */
+    lcd_show_string(10, 100, 200, 32, LCD_FONT_32, "ESP32-S3", RED);      /* LCD显示32号字体ESP32S3 */
+    lcd_show_string(10, 132, 200, 24, LCD_FONT_24, "TFTLCD TEST", RED);   /* LCD显示24号字体TFTLCD TEST */
+    lcd_show_string(10, 156, 200, 16, LCD_FONT_16, "ATOM@ALIENTEK", RED); /* LCD显示16号字体ATOM@ALIENTEK */
+    delay(500);
 }
 
 // 更新LCD显示

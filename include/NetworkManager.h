@@ -3,8 +3,8 @@
 #include <WiFi.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
-#include <Preferences.h>
 #include <LittleFS.h>
+#include <ArduinoJson.h>
 #include "RequestQueue.h"
 
 enum class NetworkState {
@@ -47,7 +47,7 @@ private:
     static constexpr const char* SETUP_PAGE_PATH = "/wifi_setup.html";
 
     NetworkState state;
-    Preferences preferences;
+    String configFilePath;
     AsyncWebServer server;
     AsyncWebSocket ws;
     RequestQueue<NetworkRequest> requestQueue;
@@ -65,12 +65,15 @@ private:
     void connect();
     void checkConnection();
     
-    bool loadCredentials();
-    void saveCredentials(const String& ssid, const String& password);
-    void clearCredentials();
+    bool loadConfigFromFile();
+    void saveConfigToFile(const String& ssid, const String& password);
+    void createDefaultConfig();
+    bool parseConfigFile(const String& content);
     
     String generateUniqueSSID();
     void queueRequest(NetworkRequest::Type type, const String& data = "");
+    void printConnectionStatus();
+    String repeatChar(const char* ch, int count);
 
     // Web handlers
     void handleRoot(AsyncWebServerRequest *request);

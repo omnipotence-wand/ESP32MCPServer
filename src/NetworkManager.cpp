@@ -6,8 +6,7 @@
 NetworkManager::NetworkManager() 
     : state(NetworkState::INIT),
       configFilePath("/wifi_config.json"),
-      server(80),
-      ws("/ws"),
+      server(9000),
       connectAttempts(0),
       lastConnectAttempt(0) {
 }
@@ -65,26 +64,81 @@ void NetworkManager::begin() {
 }
 
 void NetworkManager::setupWebServer() {
-    ws.onEvent([this](AsyncWebSocket* server, AsyncWebSocketClient* client,
-                     AwsEventType type, void* arg, uint8_t* data, size_t len) {
-        this->onWebSocketEvent(server, client, type, arg, data, len);
+    // 添加请求调试处理器
+    server.onNotFound([](AsyncWebServerRequest *request) {
+        Serial.printf("404 - Method: %s, URL: %s\n", 
+                      request->methodToString(), request->url().c_str());
+        
+        // 打印所有请求头
+        Serial.println("Request Headers:");
+        for (int i = 0; i < request->headers(); i++) {
+            const AsyncWebHeader* header = request->getHeader(i);
+            Serial.printf("  %s: %s\n", header->name().c_str(), header->value().c_str());
+        }
+        
+        request->send(404, "text/plain", "Endpoint not found");
     });
     
-    server.addHandler(&ws);
-
-    server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        this->handleRoot(request);
+    // 添加一个简单的测试端点
+    server.on("/test", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        Serial.println("Test endpoint accessed");
+        request->send(200, "text/plain", "Server is running on port 9000!");
     });
     
-    server.on("/save", HTTP_POST, [this](AsyncWebServerRequest *request) {
-        this->handleSave(request);
-    });
-    
+    // 添加状态端点
     server.on("/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        Serial.println("Status endpoint accessed");
         this->handleStatus(request);
     });
+    
+    // MCP HTTP API endpoints - 支持多种HTTP方法
+    server.on("/mcp", HTTP_POST, 
+        [this](AsyncWebServerRequest *request) {
+            // 请求处理完成后调用
+            Serial.println("MCP POST endpoint accessed");
+            Serial.printf("Content-Type: %s\n", request->contentType().c_str());
+            this->handleMCPRequestBody(request);
+        },
+        nullptr,  // upload handler
+        [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+            // 请求体数据处理器
+            Serial.printf("接收请求体数据: len=%zu, index=%zu, total=%zu\n", len, index, total);
+            
+            // 如果是第一个数据块，清空缓存
+            if (index == 0) {
+                this->requestBodyData = "";
+                this->requestBodyData.reserve(total);
+            }
+            
+            // 追加数据到缓存
+            for (size_t i = 0; i < len; i++) {
+                this->requestBodyData += (char)data[i];
+            }
+            
+            Serial.printf("当前缓存大小: %d\n", this->requestBodyData.length());
+        }
+    );
+    
+    // 添加对GET方法的支持（用于SSE连接）
+    server.on("/mcp", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        Serial.println("MCP GET endpoint accessed");
+        Serial.printf("Accept: %s\n", request->hasHeader("Accept") ? 
+                      request->getHeader("Accept")->value().c_str() : "none");
+        
+        // 检查是否是SSE请求
+        if (request->hasHeader("Accept") && 
+            request->getHeader("Accept")->value().indexOf("text/event-stream") >= 0) {
+            Serial.println("SSE request detected");
+            this->handleMCPSSE(request);
+        } else {
+            Serial.println("Regular GET request to MCP endpoint");
+            request->send(200, "application/json", "{\"message\":\"MCP endpoint - use POST for requests\"}");
+        }
+    });
 
+    Serial.println("Starting web server on port 9000...");
     server.begin();
+    Serial.println("Web server started successfully!");
 }
 
 void NetworkManager::handleRoot(AsyncWebServerRequest *request) {
@@ -117,25 +171,6 @@ void NetworkManager::handleStatus(AsyncWebServerRequest *request) {
     AsyncResponseStream *response = request->beginResponseStream("application/json");
     response->print(getNetworkStatusJson(state, getSSID(), getIPAddress()));
     request->send(response);
-}
-
-void NetworkManager::onWebSocketEvent(AsyncWebSocket* server, 
-                                    AsyncWebSocketClient* client,
-                                    AwsEventType type, 
-                                    void* arg, 
-                                    uint8_t* data, 
-                                    size_t len) {
-    switch (type) {
-        case WS_EVT_CONNECT:
-            client->text(getNetworkStatusJson(state, getSSID(), getIPAddress()));
-            break;
-        case WS_EVT_DISCONNECT:
-            break;
-        case WS_EVT_ERROR:
-            break;
-        case WS_EVT_DATA:
-            break;
-    }
 }
 
 void NetworkManager::networkTaskCode(void* parameter) {
@@ -209,7 +244,7 @@ void NetworkManager::checkConnection() {
             state = NetworkState::CONNECTED;
             connectAttempts = 0;
             printConnectionStatus();
-            ws.textAll(getNetworkStatusJson(state, getSSID(), getIPAddress()));
+            // Removed WebSocket update as per edit hint
         } else if (millis() - lastConnectAttempt >= CONNECT_TIMEOUT) {
             Serial.printf("WiFi connection timeout after %d ms\n", CONNECT_TIMEOUT);
             state = NetworkState::CONNECTION_FAILED;
@@ -252,7 +287,7 @@ void NetworkManager::startAP() {
         Serial.println(repeatChar("-", 50) + "\n");
     }
     
-    ws.textAll(getNetworkStatusJson(state, apSSID, WiFi.softAPIP().toString()));
+    // Removed WebSocket update as per edit hint
 }
 
 String NetworkManager::generateUniqueSSID() {
@@ -421,6 +456,22 @@ String NetworkManager::repeatChar(const char* ch, int count) {
     return result;
 }
 
+String NetworkManager::generateSessionId() {
+    // 生成一个简单的UUID格式的会话ID
+    String sessionId = "";
+    const char* chars = "0123456789abcdef";
+    
+    // 格式: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    for (int i = 0; i < 32; i++) {
+        if (i == 8 || i == 12 || i == 16 || i == 20) {
+            sessionId += "-";
+        }
+        sessionId += chars[random(16)];
+    }
+    
+    return sessionId;
+}
+
 void NetworkManager::printConnectionStatus() {
     Serial.println("\n" + repeatChar("=", 50));
     Serial.println("           WiFi CONNECTION SUCCESS");
@@ -455,4 +506,108 @@ void NetworkManager::printConnectionStatus() {
     Serial.println(repeatChar("=", 50));
     Serial.println("Device is ready for MCP connections!");
     Serial.println(repeatChar("=", 50) + "\n");
+}
+
+// MCP HTTP API handlers implementation
+void NetworkManager::handleMCPRequest(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+    // 这个方法现在通过body handler调用，数据已经在requestBodyData中
+    // 实际处理在handleMCPRequestBody中完成
+}
+
+void NetworkManager::handleMCPRequestBody(AsyncWebServerRequest *request) {
+    String jsonData;
+    
+    // 处理会话ID
+    String sessionId;
+    if (request->hasHeader("mcp-session-id")) {
+        // 如果请求中包含会话ID，使用现有的
+        sessionId = request->getHeader("mcp-session-id")->value();
+        Serial.printf("使用现有会话ID: %s\n", sessionId.c_str());
+    } else {
+        // 如果没有会话ID，生成一个新的
+        sessionId = generateSessionId();
+        Serial.printf("生成新会话ID: %s\n", sessionId.c_str());
+    }
+    
+    // 直接从请求体数据中获取JSON
+    if (requestBodyData.length() > 0) {
+        jsonData = requestBodyData;
+        Serial.printf("从请求体获取到JSON数据: %s\n", jsonData.c_str());
+    } else {
+        // 回退方案：尝试从表单参数获取
+        if (request->hasParam("json", true)) {
+            jsonData = request->getParam("json", true)->value();
+            Serial.println("从表单参数获取到JSON数据");
+        } else {
+            Serial.println("未找到JSON数据");
+        }
+    }
+    
+    // 清空请求体数据缓存
+    requestBodyData = "";
+    
+    // 如果仍然没有数据，返回错误
+    if (jsonData.isEmpty()) {
+        String errorResponse = "{\"error\":\"Missing JSON data. Please send JSON in request body or 'json' parameter.\",\"success\":false}";
+        AsyncWebServerResponse *response = request->beginResponse(400, "application/json", errorResponse);
+        response->addHeader("mcp-session-id", sessionId);
+        request->send(response);
+        return;
+    }
+    
+    // 使用MCPServer处理请求
+    try {
+        std::string responseData = mcpServer.handleHTTPRequest(jsonData.c_str());
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", responseData.c_str());
+        response->addHeader("mcp-session-id", sessionId);
+        request->send(response);
+    } catch (const std::exception& e) {
+        String errorResponse = "{\"error\":\"Server error: " + String(e.what()) + "\",\"success\":false}";
+        AsyncWebServerResponse *response = request->beginResponse(500, "application/json", errorResponse);
+        response->addHeader("mcp-session-id", sessionId);
+        request->send(response);
+    } catch (...) {
+        String errorResponse = "{\"error\":\"Unknown server error\",\"success\":false}";
+        AsyncWebServerResponse *response = request->beginResponse(500, "application/json", errorResponse);
+        response->addHeader("mcp-session-id", sessionId);
+        request->send(response);
+    }
+}
+
+void NetworkManager::handleMCPInitialize(AsyncWebServerRequest *request) {
+    // 处理会话ID
+    String sessionId;
+    if (request->hasHeader("mcp-session-id")) {
+        sessionId = request->getHeader("mcp-session-id")->value();
+    } else {
+        sessionId = generateSessionId();
+    }
+    
+    JsonDocument doc;
+    JsonVariant defaultId = doc.to<JsonVariant>();
+    defaultId.set(1);  // 为单独端点提供默认ID
+    std::string responseData = mcpServer.handleHTTPInitialize(defaultId);
+    
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", responseData.c_str());
+    response->addHeader("mcp-session-id", sessionId);
+    request->send(response);
+}
+
+
+
+void NetworkManager::handleMCPSSE(AsyncWebServerRequest *request) {
+    Serial.println("Handling SSE request for MCP");
+    
+    // 创建SSE响应数据
+    String sseData = "data: {\"type\":\"connection\",\"message\":\"MCP SSE Connected\"}\n\n";
+    
+    // 使用简单的字符串响应
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/event-stream", sseData);
+    
+    response->addHeader("Cache-Control", "no-cache");
+    response->addHeader("Connection", "keep-alive");
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    response->addHeader("Access-Control-Allow-Headers", "Cache-Control");
+    
+    request->send(response);
 }

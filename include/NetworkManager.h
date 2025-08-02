@@ -6,6 +6,7 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include "RequestQueue.h"
+#include "MCPServer.h"
 
 enum class NetworkState {
     INIT,
@@ -45,18 +46,20 @@ private:
     static constexpr uint8_t MAX_CONNECT_ATTEMPTS = 3;
     static constexpr uint16_t RECONNECT_INTERVAL = 5000; // 5 seconds
     static constexpr const char* SETUP_PAGE_PATH = "/wifi_setup.html";
+    static constexpr uint16_t HTTP_PORT = 9000; // HTTP服务器端口
 
     NetworkState state;
     String configFilePath;
     AsyncWebServer server;
-    AsyncWebSocket ws;
     RequestQueue<NetworkRequest> requestQueue;
     TaskHandle_t networkTaskHandle;
+    mcp::MCPServer mcpServer;
     
     String apSSID;
     uint8_t connectAttempts;
     uint32_t lastConnectAttempt;
     NetworkCredentials credentials;
+    String requestBodyData;  // 用于存储HTTP请求体数据
 
     void setupWebServer();
     void handleRequest(const NetworkRequest& request);
@@ -74,13 +77,18 @@ private:
     void queueRequest(NetworkRequest::Type type, const String& data = "");
     void printConnectionStatus();
     String repeatChar(const char* ch, int count);
+    String generateSessionId();
 
     // Web handlers
     void handleRoot(AsyncWebServerRequest *request);
     void handleSave(AsyncWebServerRequest *request);
     void handleStatus(AsyncWebServerRequest *request);
-    void onWebSocketEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
-                         AwsEventType type, void* arg, uint8_t* data, size_t len);
+    
+    // MCP HTTP API handlers
+    void handleMCPRequest(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total);
+    void handleMCPRequestBody(AsyncWebServerRequest *request);
+    void handleMCPInitialize(AsyncWebServerRequest *request);
+    void handleMCPSSE(AsyncWebServerRequest *request);
     
     static void networkTaskCode(void* parameter);
     void networkTask();

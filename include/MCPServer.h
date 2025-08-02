@@ -34,6 +34,11 @@ public:
     void sendResponse(uint8_t clientId, const RequestId &id, const MCPResponse &response);
     void sendError(uint8_t clientId, const RequestId &id, int code, const std::string &message);
     void broadcastResourceUpdate(const std::string &uri);
+    
+    // HTTP API methods
+    std::string handleHTTPRequest(const std::string &jsonRequest);
+    std::string handleHTTPInitialize(const JsonVariant &id);
+    std::string handleHTTPToolsList(const JsonVariant &id);
 
 private:
     uint16_t port_;
@@ -42,6 +47,13 @@ private:
 
     MCPRequest parseRequest(const std::string &json);
     std::string serializeResponse(const RequestId &id, const MCPResponse &response);
+    
+    // JSON-RPC 2.0 响应方法
+    std::string createJSONRPCResponse(const JsonVariant &id, const JsonVariant &result);
+    std::string createJSONRPCError(int code, const std::string &message, const JsonVariant &id, const JsonVariant &data = JsonVariant());
+    
+    // 保留旧方法以保持兼容性
+    std::string createHTTPResponse(bool success, const std::string &message, const JsonVariant &data = JsonVariant());
 };
 
 } // namespace mcp

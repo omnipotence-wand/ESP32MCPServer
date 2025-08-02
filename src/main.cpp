@@ -2,11 +2,13 @@
 #include <LittleFS.h>
 #include "NetworkManager.h"
 #include "MCPServer.h"
+#include "ac.h"
 
 using namespace mcp;
 // Global instances
 NetworkManager networkManager;
 MCPServer mcpServer;
+AirConditioner airConditioner;
 
 // Task handles
 TaskHandle_t mcpTaskHandle = nullptr;
@@ -56,6 +58,22 @@ void setup() {
     // Initialize MCP server
     Serial.println("Initializing MCP server...");
     mcpServer.begin(networkManager.isConnected());
+
+    // Initialize Air Conditioner with LCD
+    Serial.println("Initializing Air Conditioner...");
+    
+    // 验证空调系统基本状态
+    Serial.printf("✅ Air Conditioner basic system initialized - Mode: %s, Temp: %d°C, Status: %s\n", 
+                  airConditioner.getModeString().c_str(), 
+                  airConditioner.getTemperature(), 
+                  airConditioner.getStatusString().c_str());
+    
+    // 初始化LCD屏幕
+    if (!airConditioner.initLCD()) {
+        Serial.println("❌ LCD initialization failed. Air Conditioner will not display.");
+    } else {
+        Serial.println("✅ Air Conditioner initialized with LCD.");
+    }
 
     // Create MCP task
     Serial.println("Creating MCP task on core 1...");

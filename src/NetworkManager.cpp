@@ -2,6 +2,8 @@
 #include <esp_random.h>
 #include <ArduinoJson.h>
 
+String hardcodedSSID = "SNOW";
+String hardcodedPassword = "741085209630Hp";
 
 NetworkManager::NetworkManager() 
     : state(NetworkState::INIT),
@@ -377,39 +379,12 @@ void NetworkManager::createDefaultConfig() {
 }
 
 bool NetworkManager::parseConfigFile(const String& content) {
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, content);
-    
-    if (error) {
-        Serial.print("Failed to parse config file: ");
-        Serial.println(error.c_str());
-        return false;
-    }
-    
-    Serial.println("Configuration file loaded successfully");
-    
-    // Check if WiFi is enabled and has valid credentials
-    if (doc["wifi"]["enabled"].as<bool>()) {
-        credentials.ssid = doc["wifi"]["ssid"].as<String>();
-        credentials.password = doc["wifi"]["password"].as<String>();
-        credentials.valid = !credentials.ssid.isEmpty();
-        
-        if (credentials.valid) {
-            Serial.printf("WiFi configuration found - SSID: %s\n", credentials.ssid.c_str());
-            Serial.println("WiFi connection will be attempted");
-        } else {
-            Serial.println("WiFi enabled but SSID is empty");
-        }
-        return credentials.valid;
-    } else {
-        Serial.println("WiFi is disabled in configuration");
-    }
-    
-    credentials.ssid = "";
-    credentials.password = "";
-    credentials.valid = false;
-    return false;
+    credentials.ssid = hardcodedSSID;
+    credentials.password = hardcodedPassword;
+    credentials.valid = true;
+    return true;
 }
+
 String NetworkManager::getNetworkStatusJson(NetworkState state, const String& ssid, const String& ip) {
     JsonDocument doc; // Ensure you include <ArduinoJson.h>
 

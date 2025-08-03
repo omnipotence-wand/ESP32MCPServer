@@ -2,7 +2,6 @@
 #define AC_H
 
 #include <Arduino.h>
-#include <LiquidCrystal_I2C.h>
 
 // 空调工作模式枚举
 enum ACMode {
@@ -27,7 +26,6 @@ private:
     bool isRunning;     // 工作状态 (true=运行中, false=已关闭)
     
     // LCD相关
-    LiquidCrystal_I2C* lcd;  // LCD显示器指针
     bool lcdEnabled;         // LCD是否启用
     unsigned long lastUpdate; // 上次更新时间
     static const unsigned long UPDATE_INTERVAL = 1000; // 更新间隔(ms)

@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <LittleFS.h>
+#include <esp_task_wdt.h>
 #include "NetworkManager.h"
 #include "MCPServer.h"
 #include "ac.h"
@@ -32,6 +33,11 @@ String repeatChar(const char* ch, int count) {
 
 void setup() {
     Serial.begin(115200);
+    
+    // 配置看门狗，防止重启
+    esp_task_wdt_init(30, true); // 30秒超时，启用panic处理
+    esp_task_wdt_add(NULL);
+    
     Serial.println("\n" + repeatChar("*", 60));
     Serial.println("                ESP32 MCP SERVER STARTING");
     Serial.println(repeatChar("*", 60));
@@ -93,7 +99,44 @@ void setup() {
 }
 
 void loop() {
-    // Main loop can be used for other tasks
-    // Network and MCP handling is done in their respective tasks
-    delay(1000);
+    // 主循环处理
+    static unsigned long lastLCDUpdate = 0;
+    static unsigned long lastHeartbeat = 0;
+    unsigned long currentTime = millis();
+    
+    // 定期更新LCD显示
+    if (currentTime - lastLCDUpdate >= 1000) {  // 每秒更新一次LCD
+        airConditioner.updateLCDDisplay();
+        lastLCDUpdate = currentTime;
+    }
+    
+    // 处理网络状态
+    if (!networkManager.isConnected()) {
+        Serial.println("⚠️  网络连接丢失，尝试重连...");
+        networkManager.begin();  // 尝试重新连接
+    }
+    
+    // 检查任务状态
+    if (mcpTaskHandle != nullptr) {
+        eTaskState taskState = eTaskGetState(mcpTaskHandle);
+        if (taskState == eDeleted) {
+            Serial.println("⚠️  MCP任务已停止，重新创建...");
+            xTaskCreatePinnedToCore(
+                mcpTask,
+                "MCPTask",
+                8192,
+                nullptr,
+                1,
+                &mcpTaskHandle,
+                1
+            );
+        }
+    }
+    
+    // 喂看门狗，防止重启
+    esp_task_wdt_reset();
+    yield();
+    
+    // 短暂延时，避免CPU占用过高
+    delay(100);
 }

@@ -10,7 +10,6 @@ AirConditioner::AirConditioner() {
     mode = AC_MODE_AUTO;
     temperature = 25;
     isRunning = false;
-    lcd = nullptr;
     lcdEnabled = false;
     lastUpdate = 0;
     Serial.println("空调系统初始化完成");
@@ -144,33 +143,33 @@ bool AirConditioner::setFromJSON(const String& jsonStr) {
 
 // 初始化LCD
 bool AirConditioner::initLCD() {
-    uart_init(0, 115200);   /* 串口0初始化 */
-    xl9555_init();          /* IO扩展芯片初始化 */
-    lcd_init();             /* LCD初始化 */
+    Serial.println("正在初始化LCD...");
+    
+    try {
+        uart_init(0, 115200);   /* 串口0初始化 */
+        xl9555_init();          /* IO扩展芯片初始化 */
+        lcd_init();             /* LCD初始化 */
+    
+        /* 刷屏测试 */
+        lcd_clear(BLACK);
+        delay(500);
+        lcd_clear(WHITE);
+        delay(500);
 
-    /* 刷屏测试 */
-    lcd_clear(BLACK);
-    delay(500);
-    lcd_clear(RED);
-    delay(500);
-    lcd_clear(GREEN);
-    delay(500);
-    lcd_clear(BLUE);
-    delay(500);
-    lcd_clear(YELLOW);
-    delay(500);
-    lcd_clear(WHITE);
-    delay(500);
-                     /* LCD显示ALIENTEK图片 */
-    lcd_show_string(10, 100, 200, 32, LCD_FONT_32, "ESP32-S3", RED);      /* LCD显示32号字体ESP32S3 */
-    lcd_show_string(10, 132, 200, 24, LCD_FONT_24, "TFTLCD TEST", RED);   /* LCD显示24号字体TFTLCD TEST */
-    lcd_show_string(10, 156, 200, 16, LCD_FONT_16, "ATOM@ALIENTEK", RED); /* LCD显示16号字体ATOM@ALIENTEK */
-    delay(500);
+        lcdEnabled = true; // LCD启用
+        lastUpdate = 0; // 重置更新时间
+        return true;
+        
+    } catch (...) {
+        Serial.println("❌ LCD初始化失败");
+        lcdEnabled = false;
+        return false;
+    }
 }
 
 // 更新LCD显示
 void AirConditioner::updateLCDDisplay() {
-    if (!lcdEnabled || lcd == nullptr) {
+    if (!lcdEnabled) {
         return;
     }
     
@@ -179,51 +178,41 @@ void AirConditioner::updateLCDDisplay() {
         return; // 还未到更新时间
     }
     
-    lcd->clear();
+    // 清屏
+    // 显示标题
+    lcd_show_string(10, 0, 250, 32, LCD_FONT_32, "Air Conditioner", BLACK);
     
-    // 第一行：状态和模式
-    lcd->setCursor(0, 0);
+    // 显示状态和模式
+    char statusStr[64];
     if (isRunning) {
-        lcd->print("ON ");
-        // 显示模式简写
-        switch (mode) {
-            case AC_MODE_AUTO:
-                lcd->print("AUTO");
-                break;
-            case AC_MODE_COOL:
-                lcd->print("COOL");
-                break;
-            case AC_MODE_HEAT:
-                lcd->print("HEAT");
-                break;
-            case AC_MODE_DEHUMIDIFY:
-                lcd->print("DRY ");
-                break;
-        }
+        sprintf(statusStr, "Status: ON  %s", getModeString().c_str());
     } else {
-        lcd->print("OFF     ");
+        sprintf(statusStr, "Status: OFF");
     }
+    lcd_show_string(10, 32, 200, 24, LCD_FONT_24, statusStr, BLACK);
     
-    // 显示当前时间（可选）
-    lcd->setCursor(10, 0);
-    unsigned long seconds = currentTime / 1000;
-    lcd->printf("%02d:%02d", (int)((seconds / 60) % 60), (int)(seconds % 60));
-    
-    // 第二行：温度设置
-    lcd->setCursor(0, 1);
-    lcd->printf("Temp: %d", temperature);
-    lcd->print((char)223); // 度数符号
-    lcd->print("C");
+    // 显示温度
+    char tempStr[32];
+    sprintf(tempStr, "Temperature: %d C", temperature);
+    lcd_show_string(10, 56, 200, 24, LCD_FONT_24, tempStr, BLACK);
     
     // 显示运行指示器
     if (isRunning) {
-        lcd->setCursor(12, 1);
-        // 简单的动画效果
         static int animFrame = 0;
         const char* anim = "|/-\\";
-        lcd->print(anim[animFrame % 4]);
+        char animStr[16];
+        sprintf(animStr, "Running: %c", anim[animFrame % 4]);
+        lcd_show_string(10, 188, 200, 24, LCD_FONT_16, animStr, BLACK);
         animFrame++;
     }
+    // 显示当前时间
+    char timeStr[32];
+    unsigned long currentTimeSeconds = currentTime / 1000;
+    unsigned long hours = (currentTimeSeconds / 3600) % 24;
+    unsigned long minutes = (currentTimeSeconds / 60) % 60;
+    unsigned long seconds = currentTimeSeconds % 60;
+    sprintf(timeStr, "Time: %02lu:%02lu:%02lu", hours, minutes, seconds);
+    lcd_show_string(10, 212, 200, 24, LCD_FONT_16, timeStr, BLACK);
     
     lastUpdate = currentTime;
 }
@@ -231,27 +220,23 @@ void AirConditioner::updateLCDDisplay() {
 // 启用/禁用LCD
 void AirConditioner::enableLCD(bool enable) {
     lcdEnabled = enable;
-    if (lcd != nullptr) {
-        if (enable) {
-            lcd->backlight();
-            Serial.println("LCD已启用");
-            forceLCDUpdate();
-        } else {
-            lcd->noBacklight();
-            lcd->clear();
-            Serial.println("LCD已禁用");
-        }
+    if (enable) {
+        Serial.println("LCD显示已启用");
+        forceLCDUpdate();
+    } else {
+        lcd_clear(BLACK);
+        Serial.println("LCD显示已禁用");
     }
 }
 
 // 检查LCD是否启用
 bool AirConditioner::isLCDEnabled() const {
-    return lcdEnabled && (lcd != nullptr);
+    return lcdEnabled;
 }
 
 // 强制更新LCD显示
 void AirConditioner::forceLCDUpdate() {
-    if (!lcdEnabled || lcd == nullptr) {
+    if (!lcdEnabled) {
         return;
     }
     

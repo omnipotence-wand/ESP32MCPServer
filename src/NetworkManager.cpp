@@ -1,6 +1,7 @@
 #include "NetworkManager.h"
 #include <esp_random.h>
 #include <ArduinoJson.h>
+#include "ESP32SSDP.h"
 
 String hardcodedSSID = "SNOW";
 String hardcodedPassword = "741085209630Hp";
@@ -72,6 +73,10 @@ void NetworkManager::begin() {
         queueRequest(NetworkRequest::Type::START_AP);
     }
     
+    // 启动 SSDP
+    initializeSSDP();
+
+    // 启动 MCP 服务
     setupWebServer();
 }
 
@@ -621,4 +626,18 @@ void NetworkManager::handleMCPSSE(AsyncWebServerRequest *request) {
     response->addHeader("Access-Control-Allow-Headers", "Cache-Control");
     
     request->send(response);
+}
+
+void NetworkManager::initializeSSDP() {
+    // 设置SSDP设备信息
+    SSDP.setDeviceType("ssdp:mcp:device");
+    SSDP.setHTTPPort(9000);
+    SSDP.setName("Media Air Conditioner");
+    SSDP.setURL("/mcp");
+    // 启动SSDP服务
+    if (SSDP.begin()) {
+        Serial.println("SSDP服务启动成功");
+    } else {
+        Serial.println("SSDP服务启动失败");
+    }
 }

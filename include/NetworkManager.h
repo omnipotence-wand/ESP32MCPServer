@@ -7,6 +7,7 @@
 #include <ArduinoJson.h>
 #include "RequestQueue.h"
 #include "MCPServer.h"
+#include "ESP32SSDP.h"
 
 enum class NetworkState {
     INIT,
@@ -94,4 +95,5 @@ private:
     static void networkTaskCode(void* parameter);
     void networkTask();
     static String getNetworkStatusJson(NetworkState state, const String& ssid, const String& ip);
+    void initializeSSDP();
 };

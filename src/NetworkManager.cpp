@@ -8,7 +8,17 @@ NetworkManager::NetworkManager()
       configFilePath("/wifi_config.json"),
       server(9000),
       connectAttempts(0),
-      lastConnectAttempt(0) {
+      lastConnectAttempt(0),
+      mcpServer(nullptr) {
+}
+
+NetworkManager::NetworkManager(mcp::MCPServer& mcpServer) 
+    : state(NetworkState::INIT),
+      configFilePath("/wifi_config.json"),
+      server(9000),
+      connectAttempts(0),
+      lastConnectAttempt(0),
+      mcpServer(&mcpServer) {
 }
 
 void NetworkManager::begin() {
@@ -76,7 +86,17 @@ void NetworkManager::setupWebServer() {
             Serial.printf("  %s: %s\n", header->name().c_str(), header->value().c_str());
         }
         
-        request->send(404, "text/plain", "Endpoint not found");
+        // 返回 JSON-RPC 2.0 格式的 404 错误响应
+        JsonDocument doc;
+        doc["jsonrpc"] = "2.0";
+        doc["id"] = nullptr;
+        JsonObject result = doc["result"].to<JsonObject>();
+        result["code"] = -32601;
+        result["message"] = "Method not found";
+        
+        String response;
+        serializeJson(doc, response);
+        request->send(404, "application/json", response);
     });
     
     // MCP HTTP API endpoints - 支持多种HTTP方法
@@ -122,6 +142,11 @@ void NetworkManager::setupWebServer() {
             Serial.println("Regular GET request to MCP endpoint");
             request->send(200, "application/json", "{\"message\":\"MCP endpoint - use POST for requests\"}");
         }
+    });
+
+    server.on("/mcp", HTTP_DELETE, [](AsyncWebServerRequest *request) {
+        Serial.println("MCP DELETE endpoint accessed");
+        request->send(200, "application/json", "{\"jsonrpc\":\"2.0\",\"id\":null,\"result\":null}");
     });
 
     Serial.println("Starting web server on port 9000...");
@@ -544,8 +569,23 @@ void NetworkManager::handleMCPRequestBody(AsyncWebServerRequest *request) {
     }
     
     // 使用MCPServer处理请求
+    if (mcpServer == nullptr) {
+        String errorResponse = "{\"error\":\"MCP Server not initialized\",\"success\":false}";
+        AsyncWebServerResponse *response = request->beginResponse(500, "application/json", errorResponse);
+        response->addHeader("mcp-session-id", sessionId);
+        request->send(response);
+        return;
+    }
+    
     try {
-        std::string responseData = mcpServer.handleHTTPRequest(jsonData.c_str());
+        std::string responseData = mcpServer->handleHTTPRequest(jsonData.c_str());
+        // 检查是否是初始化通知响应
+        if (responseData == "notifications/initialized") {
+            AsyncWebServerResponse *response = request->beginResponse(202, "application/json", responseData.c_str());
+            response->addHeader("mcp-session-id", sessionId);
+            request->send(response);
+            return;
+        }
         AsyncWebServerResponse *response = request->beginResponse(200, "application/json", responseData.c_str());
         response->addHeader("mcp-session-id", sessionId);
         request->send(response);
@@ -571,10 +611,18 @@ void NetworkManager::handleMCPInitialize(AsyncWebServerRequest *request) {
         sessionId = generateSessionId();
     }
     
+    if (mcpServer == nullptr) {
+        String errorResponse = "{\"error\":\"MCP Server not initialized\",\"success\":false}";
+        AsyncWebServerResponse *response = request->beginResponse(500, "application/json", errorResponse);
+        response->addHeader("mcp-session-id", sessionId);
+        request->send(response);
+        return;
+    }
+    
     JsonDocument doc;
     JsonVariant defaultId = doc.to<JsonVariant>();
     defaultId.set(1);  // 为单独端点提供默认ID
-    std::string responseData = mcpServer.handleHTTPInitialize(defaultId);
+    std::string responseData = mcpServer->handleHTTPInitialize(defaultId);
     
     AsyncWebServerResponse *response = request->beginResponse(200, "application/json", responseData.c_str());
     response->addHeader("mcp-session-id", sessionId);

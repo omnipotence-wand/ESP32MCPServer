@@ -7,9 +7,9 @@
 
 // 构造函数
 AirConditioner::AirConditioner() {
-    mode = AC_MODE_DEHUMIDIFY;
+    mode = AC_MODE_AUTO; // 默认模式为自动
     temperature = 25;
-    isRunning = true;
+    isRunning = false;
     lcdEnabled = false;
     lastUpdate = 0;
     Serial.println("空调系统初始化完成");

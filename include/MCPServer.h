@@ -41,6 +41,7 @@ public:
     std::string handleHTTPRequest(const std::string &jsonRequest);
     std::string handleHTTPInitialize(const JsonVariant &id);
     std::string handleHTTPToolsList(const JsonVariant &id);
+    std::string handleHTTPFunctionCalls(const JsonVariant &id, const JsonObject &params);
 
 private:
     uint16_t port_;

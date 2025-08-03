@@ -36,6 +36,7 @@ struct NetworkRequest {
 class NetworkManager {
 public:
     NetworkManager();
+    NetworkManager(mcp::MCPServer& mcpServer); // 添加接受MCPServer引用的构造函数
     void begin();
     bool isConnected();
     String getIPAddress();
@@ -53,7 +54,7 @@ private:
     AsyncWebServer server;
     RequestQueue<NetworkRequest> requestQueue;
     TaskHandle_t networkTaskHandle;
-    mcp::MCPServer mcpServer;
+    mcp::MCPServer* mcpServer; // 改为指针，指向外部创建的MCPServer对象
     
     String apSSID;
     uint8_t connectAttempts;

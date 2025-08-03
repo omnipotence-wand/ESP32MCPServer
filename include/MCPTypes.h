@@ -6,7 +6,7 @@
 
 namespace mcp {
 
-enum class MCPRequestType {
+enum class MCPRequestMethod {
     INITIALIZE,
     RESOURCES_LIST,
     RESOURCE_READ,
@@ -14,34 +14,38 @@ enum class MCPRequestType {
     UNSUBSCRIBE
 };
 
-using RequestId = uint32_t;
+using RequestId = std::string;
 
 struct MCPRequest {
-    MCPRequestType type;
+    std::string method;
     RequestId id;
-    JsonObject params;
+    JsonDocument paramsDoc;
 
-    MCPRequest() : type(MCPRequestType::INITIALIZE), id(0), params() {}
+    MCPRequest() : method(""), id("") {}
+    
+    // 获取 params 的 JsonVariant 引用
+    JsonVariantConst params() const { return paramsDoc.as<JsonVariantConst>(); }
+    
+    // 检查是否为空
+    bool hasParams() const { return !paramsDoc.isNull(); }
 };
 
 struct MCPResponse {
-    bool success;
-    std::string message;
-    JsonVariant data;
+    RequestId id;
+    JsonDocument resultDoc;
+    JsonDocument errorDoc;
+    int code; // http status code
 
-    MCPResponse() : success(false), message(""), data() {}
-    MCPResponse(bool s, const std::string &msg, JsonVariant d)
-        : success(s), message(msg), data(d) {}
-};
-
-struct MCPResource {
-    std::string name;
-    std::string uri;
-    std::string type;
-    std::string value;
-
-    MCPResource(const std::string &n, const std::string &u, const std::string &t, const std::string &v)
-        : name(n), uri(u), type(t), value(v) {}
+    MCPResponse() : code(200), id("") {}
+    MCPResponse(int code, RequestId id) : code(code), id(id) {}
+    
+    // 获取 result 和 error 的 JsonVariant 引用
+    JsonVariantConst result() const { return resultDoc.as<JsonVariantConst>(); }
+    JsonVariantConst error() const { return errorDoc.as<JsonVariantConst>(); }
+    
+    // 检查是否为空
+    bool hasResult() const { return !resultDoc.isNull(); }
+    bool hasError() const { return !errorDoc.isNull(); }
 };
 
 } // namespace mcp

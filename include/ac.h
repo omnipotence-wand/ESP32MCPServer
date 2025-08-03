@@ -34,13 +34,16 @@ public:
     // 构造函数
     AirConditioner();
     
+    // 协议中要求的获取描述的方法
+    String description();
+    String listTools();
     // 模式控制
-    bool setMode(int newMode);          // 设置工作模式
+    String setMode(int newMode);          // 设置工作模式
     int getMode() const;                // 获取工作模式
     String getModeString() const;       // 获取工作模式字符串
     
     // 温度控制
-    bool setTemperature(int temp);      // 设置温度
+    String setTemperature(int temp);      // 设置温度
     int getTemperature() const;         // 获取温度
     
     // 电源控制
@@ -58,6 +61,7 @@ public:
     bool setFromJSON(const String& jsonStr); // 从JSON字符串设置状态
     
     // LCD显示功能
+    void clearLCD();
     bool initLCD(); // 初始化LCD
     void updateLCDDisplay();            // 更新LCD显示
     void enableLCD(bool enable);        // 启用/禁用LCD

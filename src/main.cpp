@@ -6,21 +6,15 @@
 #include "ac.h"
 
 using namespace mcp;
+
 // Global instances
+
+// MCP Server 监听的端口
+int MCP_HTTP_PORT = 9000;
+
 AirConditioner airConditioner;
-MCPServer mcpServer(airConditioner);
+MCPServer mcpServer(airConditioner, MCP_HTTP_PORT);
 NetworkManager networkManager(mcpServer);
-
-// Task handles
-TaskHandle_t mcpTaskHandle = nullptr;
-
-// MCP task function
-void mcpTask(void* parameter) {
-    while (true) {
-        mcpServer.handleClient();
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-}
 
 // Helper function to repeat characters
 String repeatChar(const char* ch, int count) {
@@ -33,11 +27,6 @@ String repeatChar(const char* ch, int count) {
 
 void setup() {
     Serial.begin(115200);
-    
-    // 配置看门狗，防止重启
-    esp_task_wdt_init(30, true); // 30秒超时，启用panic处理
-    esp_task_wdt_add(NULL);
-    
     Serial.println("\n" + repeatChar("*", 60));
     Serial.println("                ESP32 MCP SERVER STARTING");
     Serial.println(repeatChar("*", 60));
@@ -49,21 +38,6 @@ void setup() {
     // Wait for network connection or AP mode
     Serial.println("Waiting for network initialization...");
     uint32_t startTime = millis();
-    while (!networkManager.isConnected() && networkManager.getIPAddress().isEmpty()) {
-        if (millis() - startTime > 100) {
-            Serial.print(".");
-            startTime = millis();
-        }
-        delay(10);
-    }
-    
-    if (!networkManager.getIPAddress().isEmpty()) {
-        Serial.println(" Done!");
-    }
-
-    // Initialize MCP server
-    Serial.println("Initializing MCP server...");
-    mcpServer.begin(networkManager.isConnected());
 
     // Initialize Air Conditioner with LCD
     Serial.println("Initializing Air Conditioner...");
@@ -83,16 +57,7 @@ void setup() {
 
     // Create MCP task
     Serial.println("Creating MCP task on core 1...");
-    xTaskCreatePinnedToCore(
-        mcpTask,
-        "MCPTask",
-        8192,
-        nullptr,
-        1,
-        &mcpTaskHandle,
-        1  // Run on core 1
-    );
-    
+
     Serial.println(repeatChar("*", 60));
     Serial.println("              SYSTEM INITIALIZATION COMPLETE");
     Serial.println(repeatChar("*", 60) + "\n");
@@ -109,34 +74,6 @@ void loop() {
         airConditioner.updateLCDDisplay();
         lastLCDUpdate = currentTime;
     }
-    
-    // 处理网络状态
-    if (!networkManager.isConnected()) {
-        Serial.println("⚠️  网络连接丢失，尝试重连...");
-        networkManager.begin();  // 尝试重新连接
-    }
-    
-    // 检查任务状态
-    if (mcpTaskHandle != nullptr) {
-        eTaskState taskState = eTaskGetState(mcpTaskHandle);
-        if (taskState == eDeleted) {
-            Serial.println("⚠️  MCP任务已停止，重新创建...");
-            xTaskCreatePinnedToCore(
-                mcpTask,
-                "MCPTask",
-                8192,
-                nullptr,
-                1,
-                &mcpTaskHandle,
-                1
-            );
-        }
-    }
-    
-    // 喂看门狗，防止重启
-    esp_task_wdt_reset();
-    yield();
-    
     // 短暂延时，避免CPU占用过高
     delay(100);
 }

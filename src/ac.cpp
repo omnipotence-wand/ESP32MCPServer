@@ -7,9 +7,9 @@
 
 // 构造函数
 AirConditioner::AirConditioner() {
-    mode = AC_MODE_AUTO;
+    mode = AC_MODE_DEHUMIDIFY;
     temperature = 25;
-    isRunning = false;
+    isRunning = true;
     lcdEnabled = false;
     lastUpdate = 0;
     Serial.println("空调系统初始化完成");
@@ -37,15 +37,15 @@ int AirConditioner::getMode() const {
 String AirConditioner::getModeString() const {
     switch (mode) {
         case AC_MODE_AUTO:
-            return "自动";
+            return "auto";
         case AC_MODE_COOL:
-            return "制冷";
+            return "cool";
         case AC_MODE_HEAT:
-            return "制热";
+            return "heat";
         case AC_MODE_DEHUMIDIFY:
-            return "抽湿";
+            return "humdify";
         default:
-            return "未知";
+            return "unknown";
     }
 }
 
@@ -183,13 +183,13 @@ void AirConditioner::updateLCDDisplay() {
     lcd_show_string(10, 0, 250, 32, LCD_FONT_32, "Air Conditioner", BLACK);
     
     // 显示状态和模式
-    char statusStr[64];
+    char statusStr[128];
     if (isRunning) {
-        sprintf(statusStr, "Status: ON  %s", getModeString().c_str());
+        sprintf(statusStr, "Status: ON Mode: %s", getModeString().c_str());
     } else {
         sprintf(statusStr, "Status: OFF");
     }
-    lcd_show_string(10, 32, 200, 24, LCD_FONT_24, statusStr, BLACK);
+    lcd_show_string(10, 32, 300, 24, LCD_FONT_24, statusStr, BLACK);
     
     // 显示温度
     char tempStr[32];

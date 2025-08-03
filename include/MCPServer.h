@@ -3,6 +3,7 @@
 
 #include <ArduinoJson.h>
 #include "MCPTypes.h"
+#include "ac.h"
 #include <unordered_map>
 #include <string>
 #include <functional>
@@ -22,6 +23,7 @@ struct ServerCapabilities {
 class MCPServer {
 public:
     MCPServer(uint16_t port = 9000);
+    MCPServer(AirConditioner& ac, uint16_t port = 9000);
 
     void begin(bool isConnected);
     void handleClient();
@@ -44,6 +46,7 @@ private:
     uint16_t port_;
     Implementation serverInfo{"esp32-mcp-server", "1.0.0"};
     ServerCapabilities capabilities{true, true};
+    AirConditioner* airConditioner_; // 空调对象指针
 
     MCPRequest parseRequest(const std::string &json);
     std::string serializeResponse(const RequestId &id, const MCPResponse &response);

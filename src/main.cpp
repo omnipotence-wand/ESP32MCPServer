@@ -8,8 +8,8 @@
 using namespace mcp;
 // Global instances
 NetworkManager networkManager;
-MCPServer mcpServer;
 AirConditioner airConditioner;
+MCPServer mcpServer(airConditioner);
 
 // Task handles
 TaskHandle_t mcpTaskHandle = nullptr;

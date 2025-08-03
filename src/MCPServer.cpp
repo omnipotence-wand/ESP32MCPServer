@@ -3,7 +3,7 @@
 
 using namespace mcp;
 
-MCPServer::MCPServer(uint16_t port) : port_(port) {}
+MCPServer::MCPServer(AirConditioner& ac, uint16_t port) : port_(port), airConditioner_(&ac) {}
 
 void MCPServer::begin(bool isConnected) {
     // 初始化LCD屏幕
@@ -152,6 +152,8 @@ std::string MCPServer::handleHTTPRequest(const std::string &jsonRequest) {
         return handleHTTPInitialize(id);
     } else if (method == "tools/list") {
         return handleHTTPToolsList(id);
+    } else if (method=="tools/call") {
+        return handleHTTPFunctionCalls(id,params);
     } else {
         return createJSONRPCError(-32601, "Method not found", id, JsonVariant());
     }
@@ -209,6 +211,71 @@ std::string MCPServer::handleHTTPToolsList(const JsonVariant &id) {
     JsonObject schema2 = tool2["inputSchema"].to<JsonObject>();
     schema2["type"] = "object";
     
+    return createJSONRPCResponse(id, result);
+}
+
+std::string MCPServer::handleHTTPToolsList(const JsonVariant &id) {
+    JsonDocument doc;
+    JsonObject result = doc.to<JsonObject>();
+    JsonArray tools = result["tools"].to<JsonArray>();
+    
+    // 添加一些示例工具
+    JsonObject tool1 = tools.add<JsonObject>();
+    tool1["name"] = "turn_on_ac";
+    tool1["description"] = "Turn on the air conditioner";
+    JsonObject schema1 = tool1["inputSchema"].to<JsonObject>();
+    schema1["type"] = "object";
+    JsonObject properties1 = schema1["properties"].to<JsonObject>();
+    JsonObject temp1 = properties1["temperature"].to<JsonObject>();
+    temp1["type"] = "number";
+    temp1["description"] = "Target temperature";
+    
+    JsonObject tool2 = tools.add<JsonObject>();
+    tool2["name"] = "turn_off_ac";
+    tool2["description"] = "Turn off the air conditioner";
+    JsonObject schema2 = tool2["inputSchema"].to<JsonObject>();
+    schema2["type"] = "object";
+    
+    return createJSONRPCResponse(id, result);
+}
+
+std::string MCPServer::handleHTTPFunctionCalls(const JsonVariant &id, const JsonObject &params) {
+    // 检查必需的参数
+    if (!params["name"].is<std::string>()) {
+        return createJSONRPCError(-32602, "Invalid params: missing 'name'", id, JsonVariant());
+    }
+    
+    std::string functionName = params["name"];
+    JsonObject arguments = params["arguments"];
+    
+    JsonDocument doc;
+    JsonObject result = doc.to<JsonObject>();
+    JsonArray content = result["content"].to<JsonArray>();
+    
+    switch (functionName) {
+        case "turnOn":
+            airConditioner_->turnOn();
+            break;
+        case "turnOff":
+            airConditioner_->turnOff();
+            break;
+        case "setMode":
+            if (!arguments["mode"].is<std::int>()) {
+                return createJSONRPCError(-32602, "Invalid params: missing 'mode'", id, JsonVariant());
+            }
+            std::int mode = arguments["mode"];
+            airConditioner_->setMode(mode);
+            break;
+        case "setTemperature":
+            if (!arguments["temperature"].is<int>()) {
+                return createJSONRPCError(-32602, "Invalid params: missing 'temperature'", id, JsonVariant());
+            }
+            std::int temperature = arguments["temperature"];
+            airConditioner_->setTemperature(temperature);
+            break;
+        default:
+            return createJSONRPCError(-32601, "Unknown function: " + functionName, id, JsonVariant());
+    }
     return createJSONRPCResponse(id, result);
 }
 

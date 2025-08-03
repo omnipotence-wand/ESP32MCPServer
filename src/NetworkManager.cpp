@@ -79,18 +79,6 @@ void NetworkManager::setupWebServer() {
         request->send(404, "text/plain", "Endpoint not found");
     });
     
-    // 添加一个简单的测试端点
-    server.on("/test", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        Serial.println("Test endpoint accessed");
-        request->send(200, "text/plain", "Server is running on port 9000!");
-    });
-    
-    // 添加状态端点
-    server.on("/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        Serial.println("Status endpoint accessed");
-        this->handleStatus(request);
-    });
-    
     // MCP HTTP API endpoints - 支持多种HTTP方法
     server.on("/mcp", HTTP_POST, 
         [this](AsyncWebServerRequest *request) {

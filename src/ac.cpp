@@ -1,6 +1,8 @@
+
 #include "ac.h"
 #include <Arduino.h>
 #include <Wire.h>
+#include <ArduinoJson.h>
 #include "uart.h"
 #include "xl9555.h"
 #include "spilcd.h"
@@ -15,20 +17,70 @@ AirConditioner::AirConditioner() {
     Serial.println("空调系统初始化完成");
 }
 
-// 设置工作模式
-bool AirConditioner::setMode(int newMode) {
-    if (newMode < AC_MODE_AUTO || newMode > AC_MODE_DEHUMIDIFY) {
-        Serial.printf("无效的工作模式: %d\n", newMode);
-        return false;
-    }
+String AirConditioner::description() {
+    return "{\"device_type\":\"空调\",\"brand\":\"美的\",\"model\":\"KFR-35GW/N8XHA1\",\"description\":\"这是一个美的空调\",\"alias\":\"次卧空调\"}";
+}
+
+String AirConditioner::listTools() {
+    JsonDocument doc;
+    JsonObject result = doc.to<JsonObject>();
+    JsonArray tools = result["tools"].to<JsonArray>();
+
+    // 开启空调工具
+    JsonObject turnOnTool = tools.add<JsonObject>();
+    turnOnTool["name"] = "turnOn";
+    turnOnTool["description"] = "开启空调";
     
+    JsonObject turnOnInputSchema = turnOnTool["inputSchema"].to<JsonObject>();
+    turnOnInputSchema["type"] = "object";
+    turnOnInputSchema["properties"].to<JsonObject>();
+    
+
+    // 关闭空调工具
+    JsonObject turnOffTool = tools.add<JsonObject>();
+    turnOffTool["name"] = "turnOff";
+    turnOffTool["description"] = "关闭空调";
+    
+    JsonObject turnOffInputSchema = turnOffTool["inputSchema"].to<JsonObject>();
+    turnOffInputSchema["type"] = "object";
+    turnOffInputSchema["properties"].to<JsonObject>();
+    
+
+    String output;
+    serializeJson(doc, output);
+    return output;
+}
+
+/*
+    设定空调工作模式
+    说明：
+        如果空调没有处于开机模式，需要先开机 
+    参数：
+        mode: 空调工作模式，0表示自动，1表示制冷，2表示制热，4表示抽湿
+    返回：
+        code: 状态码，0表示成功，1表示失败
+        msg: 若不成功展示错误信息
+*/
+String AirConditioner::setMode(int newMode) {
+    if (newMode < AC_MODE_AUTO || newMode > AC_MODE_DEHUMIDIFY) {
+        return "{\"code\":1,\"msg\":\"无效的空调模式\"}";
+    }
+    if (!isRunning) {
+        return "{\"code\":1,\"msg\":\"空调未开启，请先开启空调\"}";
+    }
     mode = newMode;
     Serial.printf("空调模式已设置为: %s\n", getModeString().c_str());
     forceLCDUpdate(); // 立即更新LCD显示
-    return true;
+    return "{\"code\":0,\"msg\":\"空调模式已设置为: " + getModeString() + "\"}";
 }
 
-// 获取工作模式
+/*
+    获取空调工作模式
+    返回：
+        code: 状态码，0表示成功，1表示失败
+        msg: 若不成功展示错误信息
+        data: 空调工作模式，0表示自动，1表示制冷，2表示制热，4表示抽湿
+*/
 int AirConditioner::getMode() const {
     return mode;
 }
@@ -49,17 +101,24 @@ String AirConditioner::getModeString() const {
     }
 }
 
-// 设置温度
-bool AirConditioner::setTemperature(int temp) {
+/*
+    设定空调温度
+    说明：
+        如果空调没有处于开机模式，需要先开机
+*/
+String AirConditioner::setTemperature(int temp) {
     if (temp < MIN_TEMPERATURE || temp > MAX_TEMPERATURE) {
         Serial.printf("温度超出范围: %d (范围: %d-%d)\n", temp, MIN_TEMPERATURE, MAX_TEMPERATURE);
-        return false;
+        return "{\"code\":1,\"msg\":\"温度超出范围\"}";
     }
-    
+    if (!isRunning) {
+        Serial.println("空调未开启，请先开启空调");
+        return "{\"code\":1,\"msg\":\"空调未开启，请先开启空调\"}";
+    }
     temperature = temp;
     Serial.printf("空调温度已设置为: %d°C\n", temperature);
     forceLCDUpdate(); // 立即更新LCD显示
-    return true;
+    return "{\"code\":0,\"msg\":\"空调温度已设置为: " + String(temperature) + "°C\"}";
 }
 
 // 获取温度
@@ -67,7 +126,9 @@ int AirConditioner::getTemperature() const {
     return temperature;
 }
 
-// 开启空调
+/*
+    开启空调
+*/
 bool AirConditioner::turnOn() {
     if (isRunning) {
         Serial.println("空调已经在运行中");
@@ -80,7 +141,10 @@ bool AirConditioner::turnOn() {
     return true;
 }
 
-// 关闭空调
+/*
+    关闭空调
+
+*/
 bool AirConditioner::turnOff() {
     if (!isRunning) {
         Serial.println("空调已经关闭");
@@ -88,6 +152,7 @@ bool AirConditioner::turnOff() {
     }
     
     isRunning = false;
+    clearLCD();
     Serial.println("空调已关闭");
     forceLCDUpdate(); // 立即更新LCD显示
     return true;
@@ -120,7 +185,13 @@ void AirConditioner::reset() {
     Serial.println("空调已重置为默认设置");
 }
 
-// 获取JSON格式的状态信息
+/*
+    获取空调状态JSON
+    返回：
+        running: true 为开机状态, false 为关机状态
+        mode: 空调工作模式，0表示自动，1表示制冷，2表示制热，4表示抽湿
+        temerature: 表示空调目标温度
+*/
 String AirConditioner::getStatusJSON() const {
     String json = "{";
     json += "\"running\":" + String(isRunning ? "true" : "false") + ",";
@@ -167,6 +238,10 @@ bool AirConditioner::initLCD() {
     }
 }
 
+void AirConditioner::clearLCD() {
+        lcd_clear(WHITE);
+}
+
 // 更新LCD显示
 void AirConditioner::updateLCDDisplay() {
     if (!lcdEnabled) {
@@ -180,7 +255,7 @@ void AirConditioner::updateLCDDisplay() {
     
     // 清屏
     // 显示标题
-    lcd_show_string(10, 0, 250, 32, LCD_FONT_32, "Air Conditioner", BLACK);
+    lcd_show_string(10, 0, 250, 32, LCD_FONT_32, (char*)"Air Conditioner", BLACK);
     
     // 显示状态和模式
     char statusStr[128];

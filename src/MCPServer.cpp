@@ -3,171 +3,155 @@
 
 using namespace mcp;
 
-MCPServer::MCPServer(uint16_t port) : port_(port), airConditioner_(nullptr) {}
+MCPServer::MCPServer(AirConditioner& ac, uint16_t port) : port_(port), airConditioner_(&ac), server(port) {}
 
-MCPServer::MCPServer(AirConditioner& ac, uint16_t port) : port_(port), airConditioner_(&ac) {
-    // 注意：在全局变量初始化时，Serial可能还没有初始化，所以这里不打印调试信息
-}
 
-void MCPServer::begin(bool isConnected) {
-    // 初始化LCD屏幕
-}
+void MCPServer::setupWebServer() {
 
-void MCPServer::handleClient() {
-    // Handle client logic
-}
+    server.on("/mcp", HTTP_POST, [this](AsyncWebServerRequest *request) {
+    }, NULL, [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        // body 数据处理回调
+        String body = "";
+        for (size_t i = 0; i < len; i++) {
+            body += (char)data[i];
+        }
+        
+        // 打印收到的MCP请求内容
+        Serial.println("========================================");
+        Serial.println("收到 /mcp 请求:");
+        Serial.printf("客户端IP: %s\n", request->client()->remoteIP().toString().c_str());
+        Serial.printf("请求长度: %zu bytes\n", len);
+        Serial.printf("请求内容: %s\n", body.c_str());
+        
+        // 打印请求头
+        Serial.println("请求头:");
+        for (size_t i = 0; i < request->headers(); i++) {
+            AsyncWebHeader* h = request->getHeader(i);
+            Serial.printf("  %s: %s\n", h->name().c_str(), h->value().c_str());
+        }
+        Serial.println("========================================");
+        
+        MCPRequest mcpReq = parseRequest(body.c_str());
+        MCPResponse mcpRes = handle(mcpReq);
+        std::string jsonResponse = serializeResponse(mcpRes);
 
-void MCPServer::handleInitialize(uint8_t clientId, const RequestId &id, const JsonObject &params) {
-    JsonDocument doc;
-    JsonObject result = doc["result"].to<JsonObject>();
-    result["serverName"] = serverInfo.name;
-    result["serverVersion"] = serverInfo.version;
-
-    sendResponse(clientId, id, MCPResponse(true, "Initialized", result));
-}
-
-void MCPServer::handleResourcesList(uint8_t clientId, const RequestId &id, const JsonObject &params) {
-    JsonDocument doc;
-    JsonArray resourcesArray = doc["resources"].to<JsonArray>();
-
-    JsonObject resObj = resourcesArray.add<JsonObject>();
-    resObj["name"] = "Resource1";
-    resObj["type"] = "Type1";
-
-    sendResponse(clientId, id, MCPResponse(true, "Resources Listed", doc.as<JsonVariant>()));
-}
-
-void MCPServer::handleResourceRead(uint8_t clientId, const RequestId &id, const JsonObject &params) {
-    if (!params["uri"].is<std::string>()) {
-        sendError(clientId, id, 400, "Invalid URI");
-        return;
-    }
-
-    JsonDocument doc;
-    JsonArray contents = doc["contents"].to<JsonArray>();
-    JsonObject content = contents.add<JsonObject>();
-    content["data"] = "Sample Data";
-
-    sendResponse(clientId, id, MCPResponse(true, "Resource Read", doc.as<JsonVariant>()));
-}
-
-void MCPServer::handleSubscribe(uint8_t clientId, const RequestId &id, const JsonObject &params) {
-    if (!params["uri"].is<std::string>()) {
-        sendError(clientId, id, 400, "Invalid URI");
-        return;
-    }
-
-    sendResponse(clientId, id, MCPResponse(true, "Subscribed", JsonVariant()));
-}
-
-void MCPServer::handleUnsubscribe(uint8_t clientId, const RequestId &id, const JsonObject &params) {
-    if (!params["uri"].is<std::string>()) {
-        sendError(clientId, id, 400, "Invalid URI");
-        return;
-    }
-
-    sendResponse(clientId, id, MCPResponse(true, "Unsubscribed", JsonVariant()));
-}
-
-void MCPServer::unregisterResource(const std::string &uri) {
-    JsonDocument doc;
-    JsonObject resource = doc.to<JsonObject>();
-    resource["uri"] = uri;
-}
-
-void MCPServer::sendResponse(uint8_t clientId, const RequestId &id, const MCPResponse &response) {
-    JsonDocument doc;
-    doc["id"] = id;
-    doc["success"] = response.success;
-    doc["message"] = response.message;
-    doc["data"] = response.data;
-
-    std::string jsonResponse;
-    serializeJson(doc, jsonResponse);
-    // Transmit response
-}
-
-void MCPServer::sendError(uint8_t clientId, const RequestId &id, int code, const std::string &message) {
-    JsonDocument doc;
-    JsonObject error = doc["error"].to<JsonObject>();
-    error["code"] = code;
-    error["message"] = message;
-
-    std::string jsonError;
-    serializeJson(doc, jsonError);
-    // Transmit error
-}
-
-void MCPServer::broadcastResourceUpdate(const std::string &uri) {
-    JsonDocument doc;
-    JsonObject params = doc["params"].to<JsonObject>();
-    params["uri"] = uri;
-
-    // Broadcast logic
+        // 处理会话ID
+        std::string sessionId;
+        if (request->hasHeader("mcp-session-id")) {
+            sessionId = request->getHeader("mcp-session-id")->value().c_str();
+        } else {
+            sessionId = generateSessionId();
+        }
+        // 发送响应
+        AsyncWebServerResponse *response = request->beginResponse(mcpRes.code, "application/json", jsonResponse.c_str());
+        response->addHeader("mcp-session-id", sessionId.c_str());
+        request->send(response);
+    });
+    
+    server.on("/mcp", HTTP_DELETE, [this](AsyncWebServerRequest *request) {
+        // 打印收到的MCP DELETE请求
+        Serial.println("========================================");
+        Serial.println("收到 /mcp DELETE 请求:");
+        Serial.printf("客户端IP: %s\n", request->client()->remoteIP().toString().c_str());
+        
+        // 打印请求头
+        Serial.println("请求头:");
+        for (size_t i = 0; i < request->headers(); i++) {
+            AsyncWebHeader* h = request->getHeader(i);
+            Serial.printf("  %s: %s\n", h->name().c_str(), h->value().c_str());
+        }
+        Serial.println("========================================");
+        
+        // DELETE 请求通常不需要请求体，直接返回成功响应
+        MCPResponse res(200, 0); // 使用新的构造函数
+        std::string jsonResponse = serializeResponse(res);
+        
+        // 处理会话ID
+        std::string sessionId;
+        if (request->hasHeader("mcp-session-id")) {
+            sessionId = request->getHeader("mcp-session-id")->value().c_str();
+        } else {
+            sessionId = generateSessionId();
+        }
+        
+        // 发送响应
+        AsyncWebServerResponse *response = request->beginResponse(res.code, "application/json", jsonResponse.c_str());
+        response->addHeader("mcp-session-id", sessionId.c_str());
+        request->send(response);
+    });
+    server.onNotFound([this](AsyncWebServerRequest *request) {
+        // 处理未找到的请求
+        MCPResponse res = createJSONRPCError(404, -32600, 0, "Path Not Found");
+        std::string jsonResponse = serializeResponse(res);
+        request->send(res.code, "application/json", jsonResponse.c_str());
+    });
+    server.begin();
 }
 
 MCPRequest MCPServer::parseRequest(const std::string &json) {
     JsonDocument doc;
-    deserializeJson(doc, json);
-
+    DeserializationError error = deserializeJson(doc, json);
+    
     MCPRequest request;
-    request.type = MCPRequestType::INITIALIZE;
-    request.id = doc["id"];
-    request.params = doc["params"].as<JsonObject>();
+    
+    // 检查 JSON 解析是否成功
+    if (error) {
+        // 如果解析失败，返回一个默认的请求对象
+        request.method = "";
+        request.id = "";
+        return request;
+    }
+    
+    request.method = doc["method"].as<std::string>();
+    request.id = doc["id"].as<std::string>();
+    request.paramsDoc = doc["params"];
     return request;
 }
 
-std::string MCPServer::serializeResponse(const RequestId &id, const MCPResponse &response) {
+std::string MCPServer::serializeResponse(const MCPResponse &response) {
     JsonDocument doc;
-    doc["id"] = id;
-    doc["success"] = response.success;
-    doc["message"] = response.message;
-    doc["data"] = response.data;
+    doc["id"] = response.id;
+    doc["jsonrpc"] = "2.0";
+
+    if (response.hasResult()) {
+        doc["result"] = response.result();
+    }
+    if (response.hasError()) {
+        doc["error"] = response.error();
+    }
 
     std::string jsonResponse;
     serializeJson(doc, jsonResponse);
     return jsonResponse;
 }
 
-// HTTP API methods implementation
-std::string MCPServer::handleHTTPRequest(const std::string &jsonRequest) {
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, jsonRequest);
+
+
+MCPResponse MCPServer::handle(MCPRequest &request) {
     
-    if (error) {
-        Serial.print("JSON解析错误: ");
-        Serial.println(error.c_str());
-        return createJSONRPCError(-32700, "Parse error", JsonVariant(), JsonVariant());
+    // 检查请求方法是否为空（表示 JSON 解析失败）
+    if (request.method.empty()) {
+        return createJSONRPCError(400, -32700, request.id, "Parse error: Invalid JSON");
     }
     
-    // 提取JSON-RPC字段
-    std::string jsonrpc = doc["jsonrpc"] | "2.0";
-    JsonVariant id = doc["id"];
-    std::string method = doc["method"] | "";
-    JsonObject params = doc["params"];
-    
-    // 验证JSON-RPC版本
-    if (jsonrpc != "2.0") {
-        return createJSONRPCError(-32600, "Invalid Request", id, JsonVariant());
-    }
-    
-    // 处理不同的方法
-    if (method == "initialize") {
-        return handleHTTPInitialize(id);
-    } else if (method == "tools/list") {
-        return handleHTTPToolsList(id);
-    } else if (method == "notifications/initialized") {
-        return "notifications/initialized";
-    } else if (method=="tools/call") {
-        return handleHTTPFunctionCalls(id,params);
+    if (request.method == "initialize") {
+        return handleInitialize(request);
+    } else if (request.method == "tools/list") {
+        return handleToolsList(request);
+    } else if (request.method == "notifications/initialized") {
+        // 处理初始化通知
+        return handleInitialized(request);
+    } else if (request.method == "tools/call") {
+        return handleFunctionCalls(request);
     } else {
-        return createJSONRPCError(-32601, "Method not found", id, JsonVariant());
+        // 未知方法
+        return createJSONRPCError(200, -32601, request.id, "Method not found: " + request.method);
     }
 }
 
-std::string MCPServer::handleHTTPInitialize(const JsonVariant &id) {
-    JsonDocument doc;
-    JsonObject result = doc.to<JsonObject>();
+MCPResponse MCPServer::handleInitialize(MCPRequest &request) {
+    MCPResponse response(200, request.id);
+    JsonObject result = response.resultDoc.to<JsonObject>();
     
     result["protocolVersion"] = "2025-03-26";
     
@@ -175,12 +159,6 @@ std::string MCPServer::handleHTTPInitialize(const JsonVariant &id) {
     JsonObject capabilities = result["capabilities"].to<JsonObject>();
     JsonObject experimental = capabilities["experimental"].to<JsonObject>();
     
-    JsonObject prompts = capabilities["prompts"].to<JsonObject>();
-    prompts["listChanged"] = false;
-    
-    JsonObject resources = capabilities["resources"].to<JsonObject>();
-    resources["subscribe"] = false;
-    resources["listChanged"] = false;
     
     JsonObject tools = capabilities["tools"].to<JsonObject>();
     tools["listChanged"] = false;
@@ -192,45 +170,34 @@ std::string MCPServer::handleHTTPInitialize(const JsonVariant &id) {
     
     result["instructions"] = "media ac";
     
-    return createJSONRPCResponse(id, result);
+    return response;
 }
 
-std::string MCPServer::handleHTTPToolsList(const JsonVariant &id) {
-    JsonDocument doc;
-    JsonObject result = doc.to<JsonObject>();
-    JsonArray tools = result["tools"].to<JsonArray>();
-    
-    // 添加一些示例工具
-    JsonObject tool1 = tools.add<JsonObject>();
-    tool1["name"] = "turn_on_ac";
-    tool1["description"] = "Turn on the air conditioner";
-    JsonObject schema1 = tool1["inputSchema"].to<JsonObject>();
-    schema1["type"] = "object";
-    JsonObject properties1 = schema1["properties"].to<JsonObject>();
-    JsonObject temp1 = properties1["temperature"].to<JsonObject>();
-    temp1["type"] = "number";
-    temp1["description"] = "Target temperature";
-    
-    JsonObject tool2 = tools.add<JsonObject>();
-    tool2["name"] = "turn_off_ac";
-    tool2["description"] = "Turn off the air conditioner";
-    JsonObject schema2 = tool2["inputSchema"].to<JsonObject>();
-    schema2["type"] = "object";
-    
-    return createJSONRPCResponse(id, result);
+MCPResponse MCPServer::handleInitialized(MCPRequest &request){
+    return MCPResponse(202, request.id);
 }
 
-std::string MCPServer::handleHTTPFunctionCalls(const JsonVariant &id, const JsonObject &params) {
+MCPResponse MCPServer::handleToolsList(MCPRequest &request) {
+    MCPResponse response(200, request.id);
+    String toolsJson = airConditioner_->listTools();
+    DeserializationError error = deserializeJson(response.resultDoc, toolsJson);
+    
+    return response;
+}
+
+MCPResponse MCPServer::handleFunctionCalls(MCPRequest &request) {
+    MCPResponse mcpResponse(200, request.id);
+    JsonVariantConst params = request.params();
+
     // 检查必需的参数
     if (!params["name"].is<std::string>()) {
-        return createJSONRPCError(-32602, "Invalid params: missing 'name'", id, JsonVariant());
+        return createJSONRPCError(200, -32602, request.id, "Missing or invalid 'name' parameter");
     }
     
     std::string functionName = params["name"];
-    JsonObject arguments = params["arguments"];
+    JsonVariantConst arguments = params["arguments"];
     
-    JsonDocument doc;
-    JsonObject result = doc.to<JsonObject>();
+    JsonObject result = mcpResponse.resultDoc.to<JsonObject>();
     JsonArray content = result["content"].to<JsonArray>();
     
     if (functionName == "turnOn") {
@@ -240,7 +207,7 @@ std::string MCPServer::handleHTTPFunctionCalls(const JsonVariant &id, const Json
             textContent["type"] = "text";
             textContent["text"] = "空调已成功开启";
         } else {
-            return createJSONRPCError(-32603, "Air Conditioner not initialized", id, JsonVariant());
+            return createJSONRPCError(200,-32603, request.id,"Air Conditioner not initialized");
         }
     } else if (functionName == "turnOff") {
         if (airConditioner_ != nullptr) {
@@ -249,23 +216,53 @@ std::string MCPServer::handleHTTPFunctionCalls(const JsonVariant &id, const Json
             textContent["type"] = "text";
             textContent["text"] = "空调已成功关闭";
         } else {
-            return createJSONRPCError(-32603, "Air Conditioner not initialized", id, JsonVariant());
+            return createJSONRPCError(200,-32603, request.id,"Air Conditioner not initialized");
         }
     } else if (functionName == "setTemperature") {
         if (airConditioner_ != nullptr) {
-            airConditioner_->setTemperature(arguments["temperature"]);
             JsonObject textContent = content.add<JsonObject>();
             textContent["type"] = "text";
-            textContent["text"] = "ok";
+            textContent["text"] = airConditioner_->setTemperature(arguments["temperature"].as<int>());
         } else {
-            return createJSONRPCError(-32603, "Air Conditioner not initialized", id, JsonVariant());
+            return createJSONRPCError(200,-32603, request.id,"Air Conditioner not initialized");
+        }
+    } else if (functionName=="setMode"){
+        if (airConditioner_ != nullptr) {
+            JsonObject textContent = content.add<JsonObject>();
+            textContent["type"] = "text";
+            textContent["text"] = airConditioner_->setMode(arguments["mode"].as<int>());
+        } else {
+            return createJSONRPCError(200,-32603, request.id,"Air Conditioner not initialized");
+        }
+    } else if (functionName=="getModeString"){
+        if (airConditioner_ != nullptr) {
+            JsonObject textContent = content.add<JsonObject>();
+            textContent["type"] = "text";
+            textContent["text"] = airConditioner_->getModeString();
+        } else {
+            return createJSONRPCError(200,-32603, request.id,"Air Conditioner not initialized");
+        }
+    } else if (functionName=="get_description"){
+        if (airConditioner_ != nullptr) {
+            JsonObject textContent = content.add<JsonObject>();
+            textContent["type"] = "text";
+            textContent["text"] = airConditioner_->description();
+        } else {
+            return createJSONRPCError(200,-32603, request.id,"Air Conditioner not initialized");
+        }
+    } else if(functionName=="getStatusJSON"){
+        if (airConditioner_ != nullptr) {
+            JsonObject textContent = content.add<JsonObject>();
+            textContent["type"] = "text";
+            textContent["text"] = airConditioner_->getStatusJSON();
+        } else {
+            return createJSONRPCError(200,-32603, request.id,"Air Conditioner not initialized");
         }
     } else {
         // 未知的函数名称
-        return createJSONRPCError(-32601, "Unknown function: " + functionName, id, JsonVariant());
+        return createJSONRPCError(200,-32601, request.id,"Method not supported: " + functionName);
     }
-    
-    return createJSONRPCResponse(id, result);
+    return mcpResponse;
 }
 
 // JSON-RPC 2.0 成功响应
@@ -281,21 +278,12 @@ std::string MCPServer::createJSONRPCResponse(const JsonVariant &id, const JsonVa
 }
 
 // JSON-RPC 2.0 错误响应
-std::string MCPServer::createJSONRPCError(int code, const std::string &message, const JsonVariant &id, const JsonVariant &data) {
-    JsonDocument doc;
-    doc["jsonrpc"] = "2.0";
-    doc["id"] = id;
+MCPResponse MCPServer::createJSONRPCError(int httpCode,int code, RequestId id, const std::string &message) {
+    MCPResponse response(httpCode, id);
     
-    JsonObject error = doc["error"].to<JsonObject>();
-    error["code"] = code;
-    error["message"] = message;
-    
-    if (!data.isNull()) {
-        error["data"] = data;
-    }
-    
-    std::string response;
-    serializeJson(doc, response);
+    response.errorDoc["code"] = code;
+    response.errorDoc["message"] = message;
+
     return response;
 }
 
@@ -312,4 +300,21 @@ std::string MCPServer::createHTTPResponse(bool success, const std::string &messa
     std::string response;
     serializeJson(doc, response);
     return response;
+}
+
+
+std::string MCPServer::generateSessionId() {
+    // 生成一个简单的UUID格式的会话ID
+    std::string sessionId = "";
+    const char* chars = "0123456789abcdef";
+    
+    // 格式: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    for (int i = 0; i < 32; i++) {
+        if (i == 8 || i == 12 || i == 16 || i == 20) {
+            sessionId += "-";
+        }
+        sessionId += chars[random(16)];
+    }
+    
+    return sessionId;
 }

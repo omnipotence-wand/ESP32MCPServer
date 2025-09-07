@@ -3,8 +3,8 @@
 #include <ArduinoJson.h>
 #include "ESP32SSDP.h"
 
-String ssid = "snowwolf";
-String password = "13651726212zzy";
+String ssid = "";
+String password = "";
 
 NetworkManager::NetworkManager() :
       connectAttempts(0),

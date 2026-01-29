@@ -3,9 +3,7 @@
 #include <esp_task_wdt.h>
 #include "NetworkManager.h"
 #include "MCPServer.h"
-#include "ac.h"
-
-using namespace mcp;
+#include "ACTools.h"
 
 // Global instances
 
@@ -13,8 +11,8 @@ using namespace mcp;
 int MCP_HTTP_PORT = 9000;
 
 AirConditioner airConditioner;
-MCPServer mcpServer(airConditioner, MCP_HTTP_PORT);
-NetworkManager networkManager(mcpServer);
+MCPServer mcpServer(MCP_HTTP_PORT, "ESP32-AC-MCP-Server", "1.0.0");
+NetworkManager networkManager;
 
 // Helper function to repeat characters
 String repeatChar(const char* ch, int count) {
@@ -54,6 +52,14 @@ void setup() {
     } else {
         Serial.println("✅ Air Conditioner initialized with LCD.");
     }
+
+    // Register MCP Tools
+    Serial.println("Registering MCP tools...");
+    registerACTools(mcpServer, airConditioner);
+
+    // Start MCP Server
+    Serial.println("Starting MCP server...");
+    mcpServer.begin();
 
     // Create MCP task
     Serial.println("Creating MCP task on core 1...");

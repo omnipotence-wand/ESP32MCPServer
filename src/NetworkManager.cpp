@@ -8,14 +8,7 @@ String password = "";
 
 NetworkManager::NetworkManager() :
       connectAttempts(0),
-      lastConnectAttempt(0),
-      mcpServer(nullptr) {
-}
-
-NetworkManager::NetworkManager(mcp::MCPServer& mcpServer) :
-      connectAttempts(0),
-      lastConnectAttempt(0),
-      mcpServer(&mcpServer) {
+      lastConnectAttempt(0) {
 }
 
 void NetworkManager::begin() {
@@ -31,10 +24,16 @@ void NetworkManager::begin() {
       Serial.print(".");
       attempts++;
     }
+    Serial.println("");
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("Failed to connect to WiFi");
         return;
     }
+    
+    Serial.println("WiFi connected");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+
     // Small delay to allow task to start
     delay(100);
     this->printConnectionStatus();
@@ -44,9 +43,6 @@ void NetworkManager::begin() {
     if (initMDNS("midea_ac_lan", HTTP_PORT)) {
         getMDNSServer().printServiceInfo();
     }
-    
-    // 启动 MCP 服务
-    mcpServer->setupWebServer();
 }
 
 void NetworkManager::printConnectionStatus() {

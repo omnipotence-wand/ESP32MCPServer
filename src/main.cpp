@@ -11,7 +11,7 @@
 int MCP_HTTP_PORT = 9000;
 
 AirConditioner airConditioner;
-MCPServer mcpServer(MCP_HTTP_PORT, "ESP32-AC-MCP-Server", "1.0.0");
+MCPServer* mcpServer = nullptr;
 NetworkManager networkManager;
 
 // Helper function to repeat characters
@@ -55,11 +55,11 @@ void setup() {
 
     // Register MCP Tools
     Serial.println("Registering MCP tools...");
-    registerACTools(mcpServer, airConditioner);
+    mcpServer = new MCPServer(MCP_HTTP_PORT, "ESP32-AC-MCP-Server", "1.0.0");
+    registerACTools(*mcpServer, airConditioner);
 
     // Start MCP Server
     Serial.println("Starting MCP server...");
-    mcpServer.begin();
 
     // Create MCP task
     Serial.println("Creating MCP task on core 1...");

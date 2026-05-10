@@ -2,4 +2,4 @@
 #include "MCPServer.h"
 #include "ac.h"
 
-void registerACTools(MCPServer& server, AirConditioner& ac);
+void registerACTools(MCPServerBase& server, AirConditioner& ac);

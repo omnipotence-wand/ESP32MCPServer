@@ -40,7 +40,9 @@ uint16_t spilcd_height = 240;       /* 屏幕的宽度 240(竖屏) */
 
 uint8_t spilcd_dir = 1;             /* 默认横屏(1)、竖屏(0) */
 
-#define USE_LCD_BUF    1            /* 默认使用lcd_buf,使用lcd_buf刷屏速度会大幅度提升,牺牲空间提高速度,内存不够时,置0即可 */
+#ifndef USE_LCD_BUF
+#define USE_LCD_BUF    0            /* 使用lcd_buf会占用整帧RAM；无PSRAM时默认关闭以保留WiFi/BLE/HTTP内存 */
+#endif
 #if USE_LCD_BUF
     #if SPI_LCD_TYPE
     uint16_t lcd_buf[320 * 240];    /* 存放一帧图像数据 */

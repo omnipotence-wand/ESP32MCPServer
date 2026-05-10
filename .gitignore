@@ -11,6 +11,7 @@
 *.swo
 build/
 dist/
+docs/
 __pycache__/
 *.pyc
 .pytest_cache/

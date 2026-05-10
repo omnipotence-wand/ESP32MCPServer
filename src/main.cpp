@@ -2,8 +2,7 @@
 #include <LittleFS.h>
 #include <esp_task_wdt.h>
 #include "NetworkManager.h"
-#include "MCPServer.h"
-#include "ACTools.h"
+#include "MCPService.h"
 
 // Global instances
 
@@ -11,8 +10,8 @@
 int MCP_HTTP_PORT = 9000;
 
 AirConditioner airConditioner;
-MCPServer* mcpServer = nullptr;
 NetworkManager networkManager;
+MCPService mcpService(airConditioner, MCP_HTTP_PORT);
 
 // Helper function to repeat characters
 String repeatChar(const char* ch, int count) {
@@ -30,13 +29,6 @@ void setup() {
     Serial.println(repeatChar("*", 60));
     Serial.println("Initializing system...");
 
-    // Start network manager (it will initialize LittleFS)
-    networkManager.begin();
-
-    // Wait for network connection or AP mode
-    Serial.println("Waiting for network initialization...");
-    uint32_t startTime = millis();
-
     // Initialize Air Conditioner with LCD
     Serial.println("Initializing Air Conditioner...");
     
@@ -53,16 +45,14 @@ void setup() {
         Serial.println("✅ Air Conditioner initialized with LCD.");
     }
 
-    // Register MCP Tools
-    Serial.println("Registering MCP tools...");
-    mcpServer = new MCPServer(MCP_HTTP_PORT, "ESP32-AC-MCP-Server", "1.0.0");
-    registerACTools(*mcpServer, airConditioner);
+    // Start MCP service. BLE starts immediately; WiFi MCP starts once WiFi is connected.
+    Serial.println("Starting MCP service...");
+    mcpService.begin();
 
-    // Start MCP Server
-    Serial.println("Starting MCP server...");
-
-    // Create MCP task
-    Serial.println("Creating MCP task on core 1...");
+    // Start network manager and then give MCP service another chance to start HTTP MCP.
+    Serial.println("Waiting for network initialization...");
+    networkManager.begin();
+    mcpService.ensureWifiTransport();
 
     Serial.println(repeatChar("*", 60));
     Serial.println("              SYSTEM INITIALIZATION COMPLETE");
@@ -72,8 +62,9 @@ void setup() {
 void loop() {
     // 主循环处理
     static unsigned long lastLCDUpdate = 0;
-    static unsigned long lastHeartbeat = 0;
     unsigned long currentTime = millis();
+
+    mcpService.loop();
     
     // 定期更新LCD显示
     if (currentTime - lastLCDUpdate >= 1000) {  // 每秒更新一次LCD

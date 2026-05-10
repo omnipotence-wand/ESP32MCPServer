@@ -6,23 +6,24 @@
 // Helper class to simplify tool creation
 class SimpleToolHandler : public ToolHandler {
 public:
-    using HandlerFunc = std::function<JsonDocument(JsonDocument)>;
+    using HandlerFunc = std::function<JsonDocument(JsonVariantConst)>;
     SimpleToolHandler(HandlerFunc func) : func_(func) {}
-    JsonDocument call(JsonDocument params) override {
+    JsonDocument call(JsonVariantConst params) override {
         return func_(params);
     }
 private:
     HandlerFunc func_;
 };
 
-void registerACTools(MCPServer& server, AirConditioner& ac) {
+void registerACTools(MCPServerBase& server, AirConditioner& ac) {
     // 1. turnOn Tool
     Tool turnOnTool;
     turnOnTool.name = "turnOn";
     turnOnTool.description = "Turn on the air conditioner";
     turnOnTool.inputSchema.type = "object";
     
-    turnOnTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonDocument params) {
+    turnOnTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params) {
+        (void)params;
         ac.turnOn();
         JsonDocument result;
         result["status"] = "on";
@@ -36,7 +37,8 @@ void registerACTools(MCPServer& server, AirConditioner& ac) {
     turnOffTool.description = "Turn off the air conditioner";
     turnOffTool.inputSchema.type = "object";
 
-    turnOffTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonDocument params) {
+    turnOffTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params) {
+        (void)params;
         ac.turnOff();
         JsonDocument result;
         result["status"] = "off";
@@ -56,8 +58,8 @@ void registerACTools(MCPServer& server, AirConditioner& ac) {
     setModeTool.inputSchema.properties["mode"] = modeProp;
     setModeTool.inputSchema.required.push_back("mode");
 
-    setModeTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonDocument params) {
-        int mode = params["mode"];
+    setModeTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params) {
+        int mode = params["mode"].as<int>();
         String res = ac.setMode(mode);
         JsonDocument result;
         DeserializationError error = deserializeJson(result, res);
@@ -80,8 +82,8 @@ void registerACTools(MCPServer& server, AirConditioner& ac) {
     setTempTool.inputSchema.properties["temperature"] = tempProp;
     setTempTool.inputSchema.required.push_back("temperature");
 
-    setTempTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonDocument params) {
-        int temp = params["temperature"];
+    setTempTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params) {
+        int temp = params["temperature"].as<int>();
         String res = ac.setTemperature(temp);
         JsonDocument result;
         deserializeJson(result, res);
@@ -95,7 +97,8 @@ void registerACTools(MCPServer& server, AirConditioner& ac) {
     getStatusTool.description = "Get AC status";
     getStatusTool.inputSchema.type = "object";
 
-    getStatusTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonDocument params) {
+    getStatusTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params) {
+        (void)params;
         String json = ac.getStatusJSON();
         JsonDocument result;
         deserializeJson(result, json);

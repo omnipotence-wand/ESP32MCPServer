@@ -1,7 +1,4 @@
 #include "NetworkManager.h"
-#include <esp_random.h>
-#include <ArduinoJson.h>
-#include "ESP32SSDP.h"
 
 String ssid = "";
 String password = "";
@@ -14,7 +11,11 @@ NetworkManager::NetworkManager() :
 void NetworkManager::begin() {
     // Initialize LittleFS if not already initialized
     WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
+    if (ssid.length() > 0) {
+        WiFi.begin(ssid, password);
+    } else {
+        WiFi.begin();
+    }
     // waiting for connect
     int attempts = 0;
     const int maxAttempts = 20; // 最多尝试20次
@@ -37,12 +38,6 @@ void NetworkManager::begin() {
     // Small delay to allow task to start
     delay(100);
     this->printConnectionStatus();
-
-
-    // 启动 mDNS 服务
-    if (initMDNS("midea_ac_lan", HTTP_PORT)) {
-        getMDNSServer().printServiceInfo();
-    }
 }
 
 void NetworkManager::printConnectionStatus() {
@@ -79,18 +74,4 @@ void NetworkManager::printConnectionStatus() {
     Serial.println("======================================");
     Serial.println("Device is ready for MCP connections!");
     Serial.println("======================================");
-}
-
-void NetworkManager::initializeSSDP() {
-    // 设置SSDP设备信息
-    SSDP.setDeviceType("ssdp:mcp:device");
-    SSDP.setHTTPPort(9000);
-    SSDP.setName("Media Air Conditioner");
-    SSDP.setURL("/mcp");
-    // 启动SSDP服务
-    if (SSDP.begin()) {
-        Serial.println("SSDP服务启动成功");
-    } else {
-        Serial.println("SSDP服务启动失败");
-    }
 }

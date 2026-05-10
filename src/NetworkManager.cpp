@@ -1,43 +1,106 @@
 #include "NetworkManager.h"
 
-String ssid = "";
-String password = "";
-
 NetworkManager::NetworkManager() :
       connectAttempts(0),
-      lastConnectAttempt(0) {
+      lastConnectAttempt(0),
+      state(NetworkState::INIT),
+      requestedSSID(""),
+      requestedPassword(""),
+      statusPrinted(false) {
 }
 
 void NetworkManager::begin() {
-    // Initialize LittleFS if not already initialized
+    Serial.println("[Network] Initializing WiFi manager");
     WiFi.mode(WIFI_STA);
-    if (ssid.length() > 0) {
-        WiFi.begin(ssid, password);
-    } else {
-        WiFi.begin();
-    }
-    // waiting for connect
-    int attempts = 0;
-    const int maxAttempts = 20; // 最多尝试20次
-    
-    while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
-      delay(500);
-      Serial.print(".");
-      attempts++;
-    }
-    Serial.println("");
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("Failed to connect to WiFi");
+
+    if (WiFi.SSID().length() == 0) {
+        state = NetworkState::INIT;
+        Serial.println("[Network] No saved WiFi credentials; waiting for BLE configuration");
         return;
     }
-    
-    Serial.println("WiFi connected");
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
 
-    // Small delay to allow task to start
-    delay(100);
-    this->printConnectionStatus();
+    startConnection();
+}
+
+void NetworkManager::loop() {
+    if (state != NetworkState::CONNECTING) {
+        if (WiFi.status() == WL_CONNECTED && !statusPrinted) {
+            state = NetworkState::CONNECTED;
+            printConnectionStatus();
+            statusPrinted = true;
+        }
+        return;
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+        if (millis() - lastConnectAttempt < CONNECT_TIMEOUT) {
+            return;
+        }
+
+        connectAttempts++;
+        Serial.printf("[Network] WiFi connection attempt %u failed\n", connectAttempts);
+        if (connectAttempts >= MAX_CONNECT_ATTEMPTS) {
+            state = NetworkState::CONNECTION_FAILED;
+            Serial.println("[Network] WiFi connection failed; keeping BLE configuration available");
+            return;
+        }
+
+        if (millis() - lastConnectAttempt >= RECONNECT_INTERVAL) {
+            startConnection(requestedSSID.length() > 0 ? requestedSSID.c_str() : nullptr,
+                            requestedSSID.length() > 0 ? requestedPassword.c_str() : nullptr);
+        }
+        return;
+    }
+
+    state = NetworkState::CONNECTED;
+    printConnectionStatus();
+    statusPrinted = true;
+}
+
+bool NetworkManager::connect(const String& ssid, const String& password) {
+    if (ssid.length() == 0) {
+        Serial.println("[Network] Refusing WiFi connection with empty SSID");
+        return false;
+    }
+
+    requestedSSID = ssid;
+    requestedPassword = password;
+    connectAttempts = 0;
+    startConnection(requestedSSID.c_str(), requestedPassword.c_str());
+    return true;
+}
+
+bool NetworkManager::isConnected() const {
+    return WiFi.status() == WL_CONNECTED;
+}
+
+String NetworkManager::getSSID() const {
+    return isConnected() ? WiFi.SSID() : requestedSSID;
+}
+
+String NetworkManager::getIPAddress() const {
+    return isConnected() ? WiFi.localIP().toString() : String("");
+}
+
+NetworkState NetworkManager::getState() const {
+    return state;
+}
+
+void NetworkManager::startConnection(const char* ssid, const char* password) {
+    WiFi.persistent(true);
+    WiFi.mode(WIFI_STA);
+
+    statusPrinted = false;
+    state = NetworkState::CONNECTING;
+    lastConnectAttempt = millis();
+
+    if (ssid && strlen(ssid) > 0) {
+        Serial.printf("[Network] Connecting to WiFi SSID: %s\n", ssid);
+        WiFi.begin(ssid, password ? password : "");
+    } else {
+        Serial.println("[Network] Connecting with saved WiFi credentials");
+        WiFi.begin();
+    }
 }
 
 void NetworkManager::printConnectionStatus() {

@@ -11,7 +11,6 @@ constexpr const char* BLE_SERVER_NAME = "ESP32-AC-MCP-BLE";
 constexpr const char* HTTP_SERVER_NAME = "ESP32-AC-MCP-HTTP";
 constexpr const char* SERVER_VERSION = "1.0.0";
 constexpr const char* SERVER_INSTRUCTIONS = "Control the ESP32 air conditioner over MCP.";
-constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 20000;
 constexpr uint32_t WIFI_TRANSPORT_CHECK_INTERVAL_MS = 3000;
 
 class ConfigureWiFiHandler : public ToolHandler {
@@ -39,8 +38,9 @@ private:
 };
 }  // namespace
 
-MCPService::MCPService(AirConditioner& airConditioner, uint16_t httpPort)
+MCPService::MCPService(AirConditioner& airConditioner, NetworkManager& networkManager, uint16_t httpPort)
     : airConditioner(airConditioner),
+      networkManager(networkManager),
       httpPort(httpPort),
       bleServer(BLE_SERVER_NAME, SERVER_VERSION, SERVER_INSTRUCTIONS),
       httpServer(nullptr),
@@ -61,11 +61,13 @@ void MCPService::begin() {
 
     BleServerConfig bleConfig;
     bleConfig.deviceName = BLE_SERVER_NAME;
+    bleConfig.txPower = ESP_PWR_LVL_P9;
+    bleConfig.advTxPower = ESP_PWR_LVL_P9;
+    bleConfig.advMinInterval = 0x20;
+    bleConfig.advMaxInterval = 0x30;
     bleServer.setBleConfig(bleConfig);
     bleServer.begin();
     bleStarted = true;
-
-    ensureWifiTransport();
 }
 
 void MCPService::loop() {
@@ -166,29 +168,17 @@ JsonDocument MCPService::configureWiFi(JsonVariantConst params) {
 
     Serial.printf("[MCP] BLE WiFi configuration requested for SSID: %s\n", ssid);
 
-    WiFi.persistent(true);
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect(true);
-    delay(200);
-    WiFi.begin(ssid, password);
-
-    const unsigned long startMs = millis();
-    while (WiFi.status() != WL_CONNECTED && (millis() - startMs) < WIFI_CONNECT_TIMEOUT_MS) {
-        delay(250);
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-        startWifiTransport();
-        result["status"] = "connected";
-        result["ssid"] = WiFi.SSID();
-        result["ip"] = ipToString(WiFi.localIP());
+    if (!networkManager.connect(ssid, password)) {
+        result["status"] = "invalid";
+        result["error"] = "failed to start WiFi connection";
         result["http_url"] = getHttpUrl();
-    } else {
-        result["status"] = "failed";
-        result["ssid"] = ssid;
-        result["ip"] = "";
-        result["http_url"] = "";
+        return result;
     }
+
+    result["status"] = "connecting";
+    result["ssid"] = ssid;
+    result["ip"] = "";
+    result["http_url"] = "";
 
     return result;
 }
@@ -202,6 +192,7 @@ JsonDocument MCPService::getWiFiStatus(JsonVariantConst params) const {
     result["status"] = connected ? "connected" : "disconnected";
     result["ssid"] = connected ? WiFi.SSID() : String("");
     result["ip"] = connected ? ipToString(WiFi.localIP()) : String("");
+    result["network_state"] = networkStateToString(networkManager.getState());
     result["http_mcp_started"] = httpServer != nullptr;
     result["http_url"] = getHttpUrl();
     result["ble_mcp_started"] = bleStarted;
@@ -215,6 +206,23 @@ String MCPService::getHttpUrl() const {
     }
 
     return String("http://") + ipToString(WiFi.localIP()) + ":" + String(httpPort) + "/mcp";
+}
+
+String MCPService::networkStateToString(NetworkState state) const {
+    switch (state) {
+        case NetworkState::INIT:
+            return "idle";
+        case NetworkState::CONNECTING:
+            return "connecting";
+        case NetworkState::CONNECTED:
+            return "connected";
+        case NetworkState::CONNECTION_FAILED:
+            return "failed";
+        case NetworkState::AP_MODE:
+            return "ap_mode";
+    }
+
+    return "unknown";
 }
 
 String MCPService::ipToString(const IPAddress& ip) const {

@@ -6,10 +6,11 @@
 #include <HttpMCPServer.h>
 
 #include "ac.h"
+#include "NetworkManager.h"
 
 class MCPService {
 public:
-    explicit MCPService(AirConditioner& airConditioner, uint16_t httpPort = 9000);
+    explicit MCPService(AirConditioner& airConditioner, NetworkManager& networkManager, uint16_t httpPort = 9000);
     ~MCPService();
 
     MCPService(const MCPService&) = delete;
@@ -27,9 +28,11 @@ public:
 private:
     void registerBleTools();
     void registerWifiTools();
+    String networkStateToString(NetworkState state) const;
     String ipToString(const IPAddress& ip) const;
 
     AirConditioner& airConditioner;
+    NetworkManager& networkManager;
     uint16_t httpPort;
     BLEMCPServer bleServer;
     HttpMCPServer* httpServer;

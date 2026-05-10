@@ -11,7 +11,7 @@ int MCP_HTTP_PORT = 9000;
 
 AirConditioner airConditioner;
 NetworkManager networkManager;
-MCPService mcpService(airConditioner, MCP_HTTP_PORT);
+MCPService mcpService(airConditioner, networkManager, MCP_HTTP_PORT);
 
 // Helper function to repeat characters
 String repeatChar(const char* ch, int count) {
@@ -64,6 +64,7 @@ void loop() {
     static unsigned long lastLCDUpdate = 0;
     unsigned long currentTime = millis();
 
+    networkManager.loop();
     mcpService.loop();
     
     // 定期更新LCD显示

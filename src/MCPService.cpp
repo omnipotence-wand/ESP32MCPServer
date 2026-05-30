@@ -2,6 +2,7 @@
 
 #include <WiFi.h>
 #include <cstring>
+#include <initializer_list>
 #include <new>
 
 #include "ACTools.h"
@@ -12,6 +13,24 @@ constexpr const char* HTTP_SERVER_NAME = "ESP32-AC-MCP-HTTP";
 constexpr const char* SERVER_VERSION = "1.0.0";
 constexpr const char* SERVER_INSTRUCTIONS = "Control the ESP32 air conditioner over MCP.";
 constexpr uint32_t WIFI_TRANSPORT_CHECK_INTERVAL_MS = 3000;
+
+// Schema helpers — keep outputSchema declarations readable.
+Properties primitive(const String& type, const String& description) {
+    Properties p;
+    p.type = type;
+    p.description = description;
+    return p;
+}
+
+Properties stringEnum(const String& description, std::initializer_list<const char*> values) {
+    Properties p;
+    p.type = "string";
+    p.description = description;
+    for (auto v : values) {
+        p.enumValues.push_back(v);
+    }
+    return p;
+}
 
 class ConfigureWiFiHandler : public ToolHandler {
 public:
@@ -87,7 +106,7 @@ void MCPService::registerBleTools() {
         return;
     }
 
-    registerACTools(bleServer, airConditioner);
+    //registerACTools(bleServer, airConditioner);
 
     Tool configWifiTool;
     configWifiTool.name = "config_wifi";
@@ -106,6 +125,21 @@ void MCPService::registerBleTools() {
     passwordProp.type = "string";
     passwordProp.description = "WiFi password";
     configWifiTool.inputSchema.properties["password"] = passwordProp;
+
+    configWifiTool.outputSchema.type = "object";
+    configWifiTool.outputSchema.properties["status"] = stringEnum(
+        "Result of the configuration attempt", {"connecting", "invalid"});
+    configWifiTool.outputSchema.properties["ssid"] = primitive(
+        "string", "SSID the connection was attempted with (present on success)");
+    configWifiTool.outputSchema.properties["ip"] = primitive(
+        "string", "Local IP, empty until the connection completes");
+    configWifiTool.outputSchema.properties["error"] = primitive(
+        "string", "Error message when status is 'invalid'");
+    configWifiTool.outputSchema.properties["http_url"] = primitive(
+        "string", "HTTP MCP URL once WiFi is up, empty otherwise");
+    configWifiTool.outputSchema.required.push_back("status");
+    configWifiTool.outputSchema.required.push_back("http_url");
+
     configWifiTool.handler = std::make_shared<ConfigureWiFiHandler>(*this);
     bleServer.RegisterTool(configWifiTool);
 
@@ -113,6 +147,31 @@ void MCPService::registerBleTools() {
     statusTool.name = "get_wifi_status";
     statusTool.description = "Get current WiFi status and WiFi MCP URL";
     statusTool.inputSchema.type = "object";
+
+    statusTool.outputSchema.type = "object";
+    statusTool.outputSchema.properties["status"] = stringEnum(
+        "WiFi link state", {"connected", "disconnected"});
+    statusTool.outputSchema.properties["ssid"] = primitive(
+        "string", "Connected SSID, empty when disconnected");
+    statusTool.outputSchema.properties["ip"] = primitive(
+        "string", "Local IP address, empty when disconnected");
+    statusTool.outputSchema.properties["network_state"] = stringEnum(
+        "NetworkManager state",
+        {"idle", "connecting", "connected", "failed", "ap_mode", "unknown"});
+    statusTool.outputSchema.properties["http_mcp_started"] = primitive(
+        "boolean", "True when the HTTP MCP transport is running");
+    statusTool.outputSchema.properties["http_url"] = primitive(
+        "string", "HTTP MCP URL, empty when not started");
+    statusTool.outputSchema.properties["ble_mcp_started"] = primitive(
+        "boolean", "True when the BLE MCP transport is running");
+    statusTool.outputSchema.required.push_back("status");
+    statusTool.outputSchema.required.push_back("ssid");
+    statusTool.outputSchema.required.push_back("ip");
+    statusTool.outputSchema.required.push_back("network_state");
+    statusTool.outputSchema.required.push_back("http_mcp_started");
+    statusTool.outputSchema.required.push_back("http_url");
+    statusTool.outputSchema.required.push_back("ble_mcp_started");
+
     statusTool.handler = std::make_shared<WiFiStatusHandler>(*this);
     bleServer.RegisterTool(statusTool);
 

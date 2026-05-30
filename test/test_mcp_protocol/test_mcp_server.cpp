@@ -1,5 +1,6 @@
 #include <unity.h>
 #include <ArduinoJson.h>
+#include "ACTools.h"
 #include "MCPServer.h"
 
 class TestMCPServer : public MCPServerBase {
@@ -94,6 +95,19 @@ void test_tools_call_returns_text_and_structured_content(void) {
     TEST_ASSERT_EQUAL_STRING("text", content[0]["type"].as<const char*>());
 }
 
+void test_ac_description_tool_returns_device_metadata(void) {
+    AirConditioner ac;
+    registerACTools(*server, ac);
+
+    MCPRequest req = server->parseRequest(
+        R"({"jsonrpc":"2.0","id":"desc-1","method":"tools/call","params":{"name":"get_description","arguments":{}}})");
+    MCPResponse res = server->handle(req);
+
+    TEST_ASSERT_EQUAL(200, res.code);
+    TEST_ASSERT_FALSE(res.hasError());
+    TEST_ASSERT_EQUAL_STRING("KFR-35GW/N8XHA1", res.result()["structuredContent"]["model"].as<const char*>());
+}
+
 void test_initialized_notification_has_no_response_body(void) {
     MCPRequest req = server->parseRequest(
         R"({"jsonrpc":"2.0","method":"notifications/initialized"})");
@@ -109,6 +123,7 @@ int runUnityTests() {
     RUN_TEST(test_initialize_uses_bootstrap_protocol_response);
     RUN_TEST(test_tools_list_contains_registered_tool_schema);
     RUN_TEST(test_tools_call_returns_text_and_structured_content);
+    RUN_TEST(test_ac_description_tool_returns_device_metadata);
     RUN_TEST(test_initialized_notification_has_no_response_body);
     return UNITY_END();
 }

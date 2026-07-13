@@ -106,7 +106,8 @@ void MCPService::registerBleTools() {
         return;
     }
 
-    //registerACTools(bleServer, airConditioner);
+    /* BLE 仅保留配网工具 + get_description(app 设备身份协议要求, 缺失会导致连接失败) */
+    registerDescriptionTool(bleServer, airConditioner);
 
     Tool configWifiTool;
     configWifiTool.name = "config_wifi";

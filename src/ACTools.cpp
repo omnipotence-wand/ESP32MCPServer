@@ -164,6 +164,10 @@ void registerACTools(MCPServerBase& server, AirConditioner& ac) {
     server.RegisterTool(getStatusTool);
 
     // 6. get_description Tool
+    registerDescriptionTool(server, ac);
+}
+
+void registerDescriptionTool(MCPServerBase& server, AirConditioner& ac) {
     Tool getDescriptionTool;
     getDescriptionTool.name = "get_description";
     getDescriptionTool.description = "Get AC device description";

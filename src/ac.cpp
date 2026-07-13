@@ -5,7 +5,7 @@
 #include <ArduinoJson.h>
 #include "uart.h"
 #include "xl9555.h"
-#include "spilcd.h"
+#include "lcd.h"
 
 // 构造函数
 AirConditioner::AirConditioner() {
@@ -219,12 +219,12 @@ bool AirConditioner::initLCD() {
     try {
         uart_init(0, 115200);   /* 串口0初始化 */
         xl9555_init();          /* IO扩展芯片初始化 */
-        lcd_init();             /* LCD初始化 */
-    
+        lcd_hw_init();          /* LCD初始化 */
+
         /* 刷屏测试 */
-        lcd_clear(BLACK);
+        lcd.fillScreen(TFT_BLACK);
         delay(500);
-        lcd_clear(WHITE);
+        lcd.fillScreen(TFT_WHITE);
         delay(500);
 
         lcdEnabled = true; // LCD启用
@@ -239,7 +239,7 @@ bool AirConditioner::initLCD() {
 }
 
 void AirConditioner::clearLCD() {
-        lcd_clear(WHITE);
+        lcd.fillScreen(TFT_WHITE);
 }
 
 // 更新LCD显示
@@ -253,42 +253,65 @@ void AirConditioner::updateLCDDisplay() {
         return; // 还未到更新时间
     }
     
-    // 清屏
-    // 显示标题
-    lcd_show_string(10, 0, 250, 32, LCD_FONT_32, (char*)"Air Conditioner", BLACK);
-    
-    // 显示状态和模式
-    char statusStr[128];
+    // 文字带背景色绘制, 变长行用 setTextPadding 清除旧内容残留
+    // Font7 为七段数码管字体, 仅含数字和冒号, 带字母的行用 Font2
+    lcd.setTextColor(TFT_BLACK, TFT_WHITE);
+
+    // 显示标题 + 分隔线
+    lcd.setFont(&fonts::Orbitron_Light_24);
+    lcd.drawString("Air Conditioner", 10, 8);
+    lcd.drawFastHLine(10, 44, 300, TFT_BLACK);
+
+    // 显示状态(大字)
+    char statusStr[64];
+    sprintf(statusStr, "Status: %s", isRunning ? "ON" : "OFF");
+    lcd.setFont(&fonts::Font4);
+    lcd.setTextPadding(300);
+    lcd.drawString(statusStr, 10, 54);
+
+    // 模式和温度仅在开机时展示, 关机时清空该区域
     if (isRunning) {
-        sprintf(statusStr, "Status: ON Mode: %s", getModeString().c_str());
+        // 显示模式(大字)
+        char modeStr[64];
+        sprintf(modeStr, "Mode: %s", getModeString().c_str());
+        lcd.drawString(modeStr, 10, 84);
+
+        // 显示温度(七段数码管放大1.5倍, 主视觉)
+        char tempStr[16];
+        sprintf(tempStr, "%d", temperature);
+        lcd.setFont(&fonts::Font7);
+        lcd.setTextSize(1.5f);
+        lcd.setTextPadding(110);
+        lcd.drawString(tempStr, 10, 116);
+        int unitX = 10 + lcd.textWidth("88") + 12;  /* 按两位数字宽度固定单位位置, 避免跳动 */
+        lcd.setTextSize(1);
+        lcd.setFont(&fonts::Font4);
+        lcd.setTextPadding(0);
+        lcd.drawString("C", unitX, 162);
     } else {
-        sprintf(statusStr, "Status: OFF");
+        lcd.fillRect(0, 84, 320, 106, TFT_WHITE);
     }
-    lcd_show_string(10, 32, 300, 24, LCD_FONT_24, statusStr, BLACK);
-    
-    // 显示温度
-    char tempStr[32];
-    sprintf(tempStr, "Temperature: %d C", temperature);
-    lcd_show_string(10, 56, 200, 24, LCD_FONT_24, tempStr, BLACK);
-    
-    // 显示运行指示器
+
+    // 底部小字: 运行指示器 + 启动时间
+    lcd.setFont(&fonts::Font2);
+    lcd.setTextPadding(140);
     if (isRunning) {
         static int animFrame = 0;
         const char* anim = "|/-\\";
         char animStr[16];
         sprintf(animStr, "Running: %c", anim[animFrame % 4]);
-        lcd_show_string(10, 188, 200, 24, LCD_FONT_16, animStr, BLACK);
+        lcd.drawString(animStr, 10, 216);
         animFrame++;
     }
-    // 显示当前时间
     char timeStr[32];
     unsigned long currentTimeSeconds = currentTime / 1000;
     unsigned long hours = (currentTimeSeconds / 3600) % 24;
     unsigned long minutes = (currentTimeSeconds / 60) % 60;
     unsigned long seconds = currentTimeSeconds % 60;
-    sprintf(timeStr, "Time: %02lu:%02lu:%02lu", hours, minutes, seconds);
-    lcd_show_string(10, 212, 200, 24, LCD_FONT_16, timeStr, BLACK);
-    
+    sprintf(timeStr, "Up %02lu:%02lu:%02lu", hours, minutes, seconds);
+    lcd.drawRightString(timeStr, 310, 216);
+    lcd.setTextPadding(0);
+
     lastUpdate = currentTime;
 }
 
@@ -299,7 +322,7 @@ void AirConditioner::enableLCD(bool enable) {
         Serial.println("LCD显示已启用");
         forceLCDUpdate();
     } else {
-        lcd_clear(BLACK);
+        lcd.fillScreen(TFT_BLACK);
         Serial.println("LCD显示已禁用");
     }
 }

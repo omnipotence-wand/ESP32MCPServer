@@ -14,6 +14,9 @@ AirConditioner::AirConditioner() {
     isRunning = false;
     lcdEnabled = false;
     lastUpdate = 0;
+    wifiState = WIFI_DISP_DISCONNECTED;
+    wifiIpPort = "";
+    lastDrawnWifiState = -1;
     Serial.println("空调系统初始化完成");
 }
 
@@ -54,32 +57,29 @@ String AirConditioner::listTools() {
 /*
     设定空调工作模式
     说明：
-        如果空调没有处于开机模式，需要先开机 
+        如果空调没有处于开机模式，需要先开机
     参数：
-        mode: 空调工作模式，0表示自动，1表示制冷，2表示制热，4表示抽湿
+        mode: 空调工作模式，0表示自动，1表示制冷，2表示制热，3表示抽湿
     返回：
-        code: 状态码，0表示成功，1表示失败
-        msg: 若不成功展示错误信息
+        错误信息字符串，空串表示设置成功
 */
 String AirConditioner::setMode(int newMode) {
     if (newMode < AC_MODE_AUTO || newMode > AC_MODE_DEHUMIDIFY) {
-        return "{\"code\":1,\"msg\":\"无效的空调模式\"}";
+        return "invalid mode (expected 0-3)";
     }
     if (!isRunning) {
-        return "{\"code\":1,\"msg\":\"空调未开启，请先开启空调\"}";
+        return "air conditioner is off; call turnOn first";
     }
     mode = newMode;
     Serial.printf("空调模式已设置为: %s\n", getModeString().c_str());
     forceLCDUpdate(); // 立即更新LCD显示
-    return "{\"code\":0,\"msg\":\"空调模式已设置为: " + getModeString() + "\"}";
+    return "";
 }
 
 /*
     获取空调工作模式
     返回：
-        code: 状态码，0表示成功，1表示失败
-        msg: 若不成功展示错误信息
-        data: 空调工作模式，0表示自动，1表示制冷，2表示制热，4表示抽湿
+        空调工作模式，0表示自动，1表示制冷，2表示制热，3表示抽湿
 */
 int AirConditioner::getMode() const {
     return mode;
@@ -105,20 +105,22 @@ String AirConditioner::getModeString() const {
     设定空调温度
     说明：
         如果空调没有处于开机模式，需要先开机
+    返回：
+        错误信息字符串，空串表示设置成功
 */
 String AirConditioner::setTemperature(int temp) {
     if (temp < MIN_TEMPERATURE || temp > MAX_TEMPERATURE) {
         Serial.printf("温度超出范围: %d (范围: %d-%d)\n", temp, MIN_TEMPERATURE, MAX_TEMPERATURE);
-        return "{\"code\":1,\"msg\":\"温度超出范围\"}";
+        return "temperature out of range (expected 16-30)";
     }
     if (!isRunning) {
         Serial.println("空调未开启，请先开启空调");
-        return "{\"code\":1,\"msg\":\"空调未开启，请先开启空调\"}";
+        return "air conditioner is off; call turnOn first";
     }
     temperature = temp;
     Serial.printf("空调温度已设置为: %d°C\n", temperature);
     forceLCDUpdate(); // 立即更新LCD显示
-    return "{\"code\":0,\"msg\":\"空调温度已设置为: " + String(temperature) + "°C\"}";
+    return "";
 }
 
 // 获取温度
@@ -189,8 +191,8 @@ void AirConditioner::reset() {
     获取空调状态JSON
     返回：
         running: true 为开机状态, false 为关机状态
-        mode: 空调工作模式，0表示自动，1表示制冷，2表示制热，4表示抽湿
-        temerature: 表示空调目标温度
+        mode: 空调工作模式，0表示自动，1表示制冷，2表示制热，3表示抽湿
+        temperature: 表示空调目标温度
 */
 String AirConditioner::getStatusJSON() const {
     String json = "{";
@@ -208,6 +210,16 @@ bool AirConditioner::setFromJSON(const String& jsonStr) {
     // 为了简化，这里只是一个占位符
     Serial.println("从JSON设置状态: " + jsonStr);
     return true;
+}
+
+// 设置网络状态 (主循环中调用, 状态变化时立即刷新LCD)
+void AirConditioner::setNetworkStatus(int state, const String& ipPort) {
+    if (state == wifiState && ipPort == wifiIpPort) {
+        return;
+    }
+    wifiState = state;
+    wifiIpPort = ipPort;
+    forceLCDUpdate();
 }
 
 // ===== LCD显示功能实现 =====
@@ -229,6 +241,7 @@ bool AirConditioner::initLCD() {
 
         lcdEnabled = true; // LCD启用
         lastUpdate = 0; // 重置更新时间
+        lastDrawnWifiState = -1; // 屏幕为空白, 首次更新时绘制WiFi图标
         return true;
         
     } catch (...) {
@@ -240,6 +253,40 @@ bool AirConditioner::initLCD() {
 
 void AirConditioner::clearLCD() {
         lcd.fillScreen(TFT_WHITE);
+        lastDrawnWifiState = -1; // 全屏已清空, 下次更新时重绘WiFi图标
+}
+
+// 绘制右上角WiFi状态图标 (三段圆弧 + 底部圆点)
+void AirConditioner::drawWifiIcon() {
+    if (wifiState == lastDrawnWifiState) {
+        return; // 状态未变化不重绘, 避免闪烁
+    }
+
+    const int cx = 298;  /* 图标基准点(底部圆点圆心) */
+    const int cy = 32;
+
+    // 清除旧图标区域
+    lcd.fillRect(cx - 18, cy - 18, 37, 23, TFT_WHITE);
+
+    // 已连接绿色, 连接中深灰, 未连接浅灰+红色斜线
+    uint16_t color;
+    switch (wifiState) {
+        case WIFI_DISP_CONNECTED:  color = TFT_DARKGREEN; break;
+        case WIFI_DISP_CONNECTING: color = TFT_DARKGREY;  break;
+        default:                   color = TFT_LIGHTGREY; break;
+    }
+
+    lcd.fillCircle(cx, cy, 2, color);
+    lcd.fillArc(cx, cy, 7, 5, 225, 315, color);
+    lcd.fillArc(cx, cy, 12, 10, 225, 315, color);
+    lcd.fillArc(cx, cy, 17, 15, 225, 315, color);
+
+    if (wifiState == WIFI_DISP_DISCONNECTED) {
+        lcd.drawLine(cx - 13, cy - 16, cx + 13, cy + 2, TFT_RED);
+        lcd.drawLine(cx - 13, cy - 15, cx + 13, cy + 3, TFT_RED);
+    }
+
+    lastDrawnWifiState = wifiState;
 }
 
 // 更新LCD显示
@@ -254,42 +301,51 @@ void AirConditioner::updateLCDDisplay() {
     }
     
     // 文字带背景色绘制, 变长行用 setTextPadding 清除旧内容残留
-    // Font7 为七段数码管字体, 仅含数字和冒号, 带字母的行用 Font2
+    // Font7 为七段数码管字体, 仅含数字和冒号, 带字母的行用 Font2/Font4
     lcd.setTextColor(TFT_BLACK, TFT_WHITE);
 
-    // 显示标题 + 分隔线
+    // 头部: 标题 + 右上角WiFi图标 + 分隔线
     lcd.setFont(&fonts::Orbitron_Light_24);
     lcd.drawString("Air Conditioner", 10, 8);
     lcd.drawFastHLine(10, 44, 300, TFT_BLACK);
+    drawWifiIcon();
 
-    // 显示状态(大字)
-    char statusStr[64];
-    sprintf(statusStr, "Status: %s", isRunning ? "ON" : "OFF");
+    // 主体左右分栏: 左栏状态/模式/网络地址(小标签+值), 右栏大字温度
+    lcd.drawFastVLine(160, 56, 140, TFT_BLACK);
+
+    // 左栏: 状态
+    lcd.setTextPadding(145);
+    lcd.setFont(&fonts::Font2);
+    lcd.drawString("STATUS", 10, 58);
     lcd.setFont(&fonts::Font4);
-    lcd.setTextPadding(300);
-    lcd.drawString(statusStr, 10, 54);
+    lcd.drawString(isRunning ? "ON" : "OFF", 10, 76);
 
-    // 模式和温度仅在开机时展示, 关机时清空该区域
+    // 左栏: 模式 (关机显示 "--")
+    lcd.setFont(&fonts::Font2);
+    lcd.drawString("MODE", 10, 112);
+    lcd.setFont(&fonts::Font4);
+    lcd.drawString(isRunning ? getModeString() : String("--"), 10, 130);
+
+    // 左栏: 网络地址, WiFi连接成功后显示HTTP MCP服务地址 "ip:port"
+    lcd.setFont(&fonts::Font2);
+    lcd.drawString("NETWORK", 10, 166);
+    bool wifiReady = (wifiState == WIFI_DISP_CONNECTED && wifiIpPort.length() > 0);
+    lcd.drawString(wifiReady ? wifiIpPort : String("--"), 10, 184);
+
+    // 右栏: 设定温度(七段数码管放大2倍, 主视觉), 仅开机时显示
     if (isRunning) {
-        // 显示模式(大字)
-        char modeStr[64];
-        sprintf(modeStr, "Mode: %s", getModeString().c_str());
-        lcd.drawString(modeStr, 10, 84);
-
-        // 显示温度(七段数码管放大1.5倍, 主视觉)
         char tempStr[16];
         sprintf(tempStr, "%d", temperature);
         lcd.setFont(&fonts::Font7);
-        lcd.setTextSize(1.5f);
-        lcd.setTextPadding(110);
-        lcd.drawString(tempStr, 10, 116);
-        int unitX = 10 + lcd.textWidth("88") + 12;  /* 按两位数字宽度固定单位位置, 避免跳动 */
+        lcd.setTextSize(2.0f);
+        lcd.setTextPadding(132);
+        lcd.drawRightString(tempStr, 296, 66);
         lcd.setTextSize(1);
         lcd.setFont(&fonts::Font4);
         lcd.setTextPadding(0);
-        lcd.drawString("C", unitX, 162);
+        lcd.drawString("C", 300, 68);
     } else {
-        lcd.fillRect(0, 84, 320, 106, TFT_WHITE);
+        lcd.fillRect(166, 56, 154, 140, TFT_WHITE); /* 关机时清空右栏, 不碰分隔线 */
     }
 
     // 底部小字: 运行指示器 + 启动时间
@@ -302,6 +358,8 @@ void AirConditioner::updateLCDDisplay() {
         sprintf(animStr, "Running: %c", anim[animFrame % 4]);
         lcd.drawString(animStr, 10, 216);
         animFrame++;
+    } else {
+        lcd.drawString("Standby", 10, 216);
     }
     char timeStr[32];
     unsigned long currentTimeSeconds = currentTime / 1000;

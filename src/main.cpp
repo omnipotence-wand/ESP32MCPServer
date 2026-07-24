@@ -66,7 +66,18 @@ void loop() {
 
     networkManager.loop();
     mcpService.loop();
-    
+
+    // 同步WiFi状态到LCD (右上角图标 + ip:port 信息行), 状态变化时立即刷新
+    if (networkManager.isConnected()) {
+        airConditioner.setNetworkStatus(WIFI_DISP_CONNECTED,
+                                        networkManager.getIPAddress() + ":" + String(MCP_HTTP_PORT));
+    } else if (networkManager.getState() == NetworkState::CONNECTING) {
+        airConditioner.setNetworkStatus(WIFI_DISP_CONNECTING, "");
+    } else {
+        airConditioner.setNetworkStatus(WIFI_DISP_DISCONNECTED, "");
+    }
+
+
     // 定期更新LCD显示
     if (currentTime - lastLCDUpdate >= 1000) {  // 每秒更新一次LCD
         airConditioner.updateLCDDisplay();

@@ -15,6 +15,13 @@ enum ACMode {
 const int MIN_TEMPERATURE = 16;  // 最低温度
 const int MAX_TEMPERATURE = 30;  // 最高温度
 
+// WiFi 显示状态 (用于LCD右上角状态图标)
+enum WiFiDisplayState {
+    WIFI_DISP_DISCONNECTED = 0,  // 未连接/连接失败
+    WIFI_DISP_CONNECTING = 1,    // 连接中
+    WIFI_DISP_CONNECTED = 2      // 已连接
+};
+
 /**
  * 空调模拟类
  * 提供空调的基本功能和状态管理
@@ -30,6 +37,13 @@ private:
     unsigned long lastUpdate; // 上次更新时间
     static const unsigned long UPDATE_INTERVAL = 1000; // 更新间隔(ms)
 
+    // 网络状态显示相关
+    int wifiState;            // WiFi显示状态 (WiFiDisplayState)
+    String wifiIpPort;        // 连接成功后的 "ip:port" 文本
+    int lastDrawnWifiState;   // 上次绘制的WiFi状态, 用于避免图标重复重绘
+
+    void drawWifiIcon();      // 绘制右上角WiFi状态图标
+
 public:
     // 构造函数
     AirConditioner();
@@ -38,12 +52,12 @@ public:
     String description();
     String listTools();
     // 模式控制
-    String setMode(int newMode);          // 设置工作模式
+    String setMode(int newMode);          // 设置工作模式, 返回错误信息(空串=成功)
     int getMode() const;                // 获取工作模式
     String getModeString() const;       // 获取工作模式字符串
     
     // 温度控制
-    String setTemperature(int temp);      // 设置温度
+    String setTemperature(int temp);      // 设置温度, 返回错误信息(空串=成功)
     int getTemperature() const;         // 获取温度
     
     // 电源控制
@@ -60,6 +74,9 @@ public:
     String getStatusJSON() const;       // 获取JSON格式的状态信息
     bool setFromJSON(const String& jsonStr); // 从JSON字符串设置状态
     
+    // 网络状态显示 (由主循环同步, state 取 WiFiDisplayState, ipPort 形如 "192.168.1.100:9000")
+    void setNetworkStatus(int state, const String& ipPort);
+
     // LCD显示功能
     void clearLCD();
     bool initLCD(); // 初始化LCD

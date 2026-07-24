@@ -34,6 +34,31 @@ static Properties stringEnum(const String& description, std::initializer_list<co
     return p;
 }
 
+// getStatus / setMode / setTemperature 共用的设备状态 schema:
+// 设置类工具直接返回调用后的完整状态, 而不是 code/msg 包装
+static void addStatusProperties(Properties& schema) {
+    schema.type = "object";
+    schema.properties["running"] = primitive("boolean", "True when AC is powered on");
+    schema.properties["mode"] = primitive("integer", "0: Auto, 1: Cool, 2: Heat, 3: Dehumidify");
+    schema.properties["modeString"] = stringEnum(
+        "Current mode label", {"auto", "cool", "heat", "humdify", "unknown"});
+    schema.properties["temperature"] = primitive("integer", "Target temperature in Celsius");
+    schema.required.push_back("running");
+    schema.required.push_back("mode");
+    schema.required.push_back("modeString");
+    schema.required.push_back("temperature");
+}
+
+// 当前设备状态 + 可选错误信息 (error 为空串时省略, 表示成功)
+static JsonDocument statusResult(AirConditioner& ac, const String& error) {
+    JsonDocument result;
+    deserializeJson(result, ac.getStatusJSON());
+    if (error.length() > 0) {
+        result["error"] = error;
+    }
+    return result;
+}
+
 void registerACTools(MCPServerBase& server, AirConditioner& ac) {
     // 1. turnOn Tool
     Tool turnOnTool;
@@ -81,27 +106,19 @@ void registerACTools(MCPServerBase& server, AirConditioner& ac) {
 
     Properties modeProp;
     modeProp.type = "integer";
-    modeProp.description = "Mode value";
+    modeProp.description = "Mode: 0=Auto, 1=Cool, 2=Heat, 3=Dehumidify";
     setModeTool.inputSchema.properties["mode"] = modeProp;
     setModeTool.inputSchema.required.push_back("mode");
 
-    setModeTool.outputSchema.type = "object";
-    setModeTool.outputSchema.properties["code"] = primitive("integer", "0 = success, 1 = failure");
-    setModeTool.outputSchema.properties["msg"] = primitive("string", "Human-readable result message");
-    setModeTool.outputSchema.required.push_back("code");
-    setModeTool.outputSchema.required.push_back("msg");
+    addStatusProperties(setModeTool.outputSchema);
+    setModeTool.outputSchema.properties["error"] =
+        primitive("string", "Present only on failure; explains why the state was not changed");
 
     setModeTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params) {
-        int mode = params["mode"].as<int>();
-        String res = ac.setMode(mode);
-        JsonDocument result;
-        DeserializationError error = deserializeJson(result, res);
-        if (error) {
-            result.clear();
-            result["code"] = 1;
-            result["msg"] = "Internal error parsing AC response";
+        if (!params["mode"].is<int>()) {
+            return statusResult(ac, "missing required parameter: mode");
         }
-        return result;
+        return statusResult(ac, ac.setMode(params["mode"].as<int>()));
     });
     server.RegisterTool(setModeTool);
 
@@ -113,27 +130,19 @@ void registerACTools(MCPServerBase& server, AirConditioner& ac) {
 
     Properties tempProp;
     tempProp.type = "integer";
-    tempProp.description = "Temperature value";
+    tempProp.description = "Target temperature in Celsius (16-30)";
     setTempTool.inputSchema.properties["temperature"] = tempProp;
     setTempTool.inputSchema.required.push_back("temperature");
 
-    setTempTool.outputSchema.type = "object";
-    setTempTool.outputSchema.properties["code"] = primitive("integer", "0 = success, 1 = failure");
-    setTempTool.outputSchema.properties["msg"] = primitive("string", "Human-readable result message");
-    setTempTool.outputSchema.required.push_back("code");
-    setTempTool.outputSchema.required.push_back("msg");
+    addStatusProperties(setTempTool.outputSchema);
+    setTempTool.outputSchema.properties["error"] =
+        primitive("string", "Present only on failure; explains why the state was not changed");
 
     setTempTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params) {
-        int temp = params["temperature"].as<int>();
-        String res = ac.setTemperature(temp);
-        JsonDocument result;
-        DeserializationError error = deserializeJson(result, res);
-        if (error) {
-            result.clear();
-            result["code"] = 1;
-            result["msg"] = "Internal error parsing AC response";
+        if (!params["temperature"].is<int>()) {
+            return statusResult(ac, "missing required parameter: temperature");
         }
-        return result;
+        return statusResult(ac, ac.setTemperature(params["temperature"].as<int>()));
     });
     server.RegisterTool(setTempTool);
 
@@ -143,23 +152,11 @@ void registerACTools(MCPServerBase& server, AirConditioner& ac) {
     getStatusTool.description = "Get AC status";
     getStatusTool.inputSchema.type = "object";
 
-    getStatusTool.outputSchema.type = "object";
-    getStatusTool.outputSchema.properties["running"] = primitive("boolean", "True when AC is powered on");
-    getStatusTool.outputSchema.properties["mode"] = primitive("integer", "0: Auto, 1: Cool, 2: Heat, 3: Dehumidify");
-    getStatusTool.outputSchema.properties["modeString"] = stringEnum(
-        "Current mode label", {"auto", "cool", "heat", "humdify", "unknown"});
-    getStatusTool.outputSchema.properties["temperature"] = primitive("integer", "Target temperature in Celsius");
-    getStatusTool.outputSchema.required.push_back("running");
-    getStatusTool.outputSchema.required.push_back("mode");
-    getStatusTool.outputSchema.required.push_back("modeString");
-    getStatusTool.outputSchema.required.push_back("temperature");
+    addStatusProperties(getStatusTool.outputSchema);
 
     getStatusTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params) {
         (void)params;
-        String json = ac.getStatusJSON();
-        JsonDocument result;
-        deserializeJson(result, json);
-        return result;
+        return statusResult(ac, "");
     });
     server.RegisterTool(getStatusTool);
 

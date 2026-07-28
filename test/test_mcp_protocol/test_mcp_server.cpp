@@ -108,6 +108,52 @@ void test_ac_description_tool_returns_device_metadata(void) {
     TEST_ASSERT_EQUAL_STRING("KFR-35GW/N8XHA1", res.result()["structuredContent"]["model"].as<const char*>());
 }
 
+// 工具执行失败必须体现为 MCP result.isError = true, 否则客户端会把带 error
+// 字段的状态当成一次正常调用。失败结果不再附带 structuredContent(它由
+// outputSchema 描述, 只用于成功返回), 失败原因通过 content 文本传达。
+void test_set_mode_missing_argument_reports_tool_error(void) {
+    AirConditioner ac;
+    registerACTools(*server, ac);
+
+    MCPRequest req = server->parseRequest(
+        R"({"jsonrpc":"2.0","id":"mode-1","method":"tools/call","params":{"name":"setMode","arguments":{}}})");
+    MCPResponse res = server->handle(req);
+
+    TEST_ASSERT_EQUAL(200, res.code);
+    TEST_ASSERT_FALSE(res.hasError());
+    TEST_ASSERT_TRUE(res.result()["isError"].as<bool>());
+    TEST_ASSERT_TRUE(res.result()["structuredContent"].isNull());
+}
+
+// 错误由 AirConditioner 层产生(空调未开机)时同样要置起 isError
+void test_set_mode_rejected_by_device_reports_tool_error(void) {
+    AirConditioner ac;
+    registerACTools(*server, ac);
+
+    MCPRequest req = server->parseRequest(
+        R"({"jsonrpc":"2.0","id":"mode-2","method":"tools/call","params":{"name":"setMode","arguments":{"mode":1}}})");
+    MCPResponse res = server->handle(req);
+
+    TEST_ASSERT_EQUAL(200, res.code);
+    TEST_ASSERT_TRUE(res.result()["isError"].as<bool>());
+    TEST_ASSERT_TRUE(res.result()["structuredContent"].isNull());
+}
+
+// 成功路径保持原样: isError 为 false, structuredContent 携带设备状态
+void test_get_status_success_has_structured_content_and_no_error(void) {
+    AirConditioner ac;
+    registerACTools(*server, ac);
+
+    MCPRequest req = server->parseRequest(
+        R"({"jsonrpc":"2.0","id":"status-1","method":"tools/call","params":{"name":"getStatus","arguments":{}}})");
+    MCPResponse res = server->handle(req);
+
+    TEST_ASSERT_EQUAL(200, res.code);
+    TEST_ASSERT_FALSE(res.result()["isError"].as<bool>());
+    TEST_ASSERT_FALSE(res.result()["structuredContent"].isNull());
+    TEST_ASSERT_TRUE(res.result()["structuredContent"]["error"].isNull());
+}
+
 void test_initialized_notification_has_no_response_body(void) {
     MCPRequest req = server->parseRequest(
         R"({"jsonrpc":"2.0","method":"notifications/initialized"})");
@@ -124,6 +170,9 @@ int runUnityTests() {
     RUN_TEST(test_tools_list_contains_registered_tool_schema);
     RUN_TEST(test_tools_call_returns_text_and_structured_content);
     RUN_TEST(test_ac_description_tool_returns_device_metadata);
+    RUN_TEST(test_set_mode_missing_argument_reports_tool_error);
+    RUN_TEST(test_set_mode_rejected_by_device_reports_tool_error);
+    RUN_TEST(test_get_status_success_has_structured_content_and_no_error);
     RUN_TEST(test_initialized_notification_has_no_response_body);
     return UNITY_END();
 }

@@ -4,13 +4,19 @@
 #include <initializer_list>
 #include <memory>
 
-// Helper class to simplify tool creation
+// Helper class to simplify tool creation.
+// handler 通过 isError 回报本次执行是否失败: 置 true 时框架会把 MCP result.isError
+// 设为 true, 客户端据此把结果当成错误而非正常返回。不会失败的工具留空该参数即可。
 class SimpleToolHandler : public ToolHandler {
 public:
-    using HandlerFunc = std::function<JsonDocument(JsonVariantConst)>;
+    using HandlerFunc = std::function<JsonDocument(JsonVariantConst, bool&)>;
     SimpleToolHandler(HandlerFunc func) : func_(func) {}
     JsonDocument call(JsonVariantConst params) override {
-        return func_(params);
+        bool ignored = false;
+        return call(params, ignored);
+    }
+    JsonDocument call(JsonVariantConst params, bool& isError) override {
+        return func_(params, isError);
     }
 private:
     HandlerFunc func_;
@@ -35,7 +41,9 @@ static Properties stringEnum(const String& description, std::initializer_list<co
 }
 
 // getStatus / setMode / setTemperature 共用的设备状态 schema:
-// 设置类工具直接返回调用后的完整状态, 而不是 code/msg 包装
+// 设置类工具直接返回调用后的完整状态, 而不是 code/msg 包装。
+// 这里不声明 error: outputSchema 只描述 structuredContent, 而失败结果
+// (isError=true) 不再附带 structuredContent, 失败原因通过 content 文本返回。
 static void addStatusProperties(Properties& schema) {
     schema.type = "object";
     schema.properties["running"] = primitive("boolean", "True when AC is powered on");
@@ -49,11 +57,13 @@ static void addStatusProperties(Properties& schema) {
     schema.required.push_back("temperature");
 }
 
-// 当前设备状态 + 可选错误信息 (error 为空串时省略, 表示成功)
-static JsonDocument statusResult(AirConditioner& ac, const String& error) {
+// 当前设备状态 + 可选错误信息 (error 为空串时省略, 表示成功)。
+// error 非空即代表本次工具调用失败, 同步置起 isError 让框架回报 MCP 层面的执行失败。
+static JsonDocument statusResult(AirConditioner& ac, const String& error, bool& isError) {
     JsonDocument result;
     deserializeJson(result, ac.getStatusJSON());
-    if (error.length() > 0) {
+    isError = error.length() > 0;
+    if (isError) {
         result["error"] = error;
     }
     return result;
@@ -70,7 +80,7 @@ void registerACTools(MCPServerBase& server, AirConditioner& ac) {
     turnOnTool.outputSchema.properties["status"] = stringEnum("Power state after the call", {"on"});
     turnOnTool.outputSchema.required.push_back("status");
 
-    turnOnTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params) {
+    turnOnTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params, bool&) {
         (void)params;
         ac.turnOn();
         JsonDocument result;
@@ -89,7 +99,7 @@ void registerACTools(MCPServerBase& server, AirConditioner& ac) {
     turnOffTool.outputSchema.properties["status"] = stringEnum("Power state after the call", {"off"});
     turnOffTool.outputSchema.required.push_back("status");
 
-    turnOffTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params) {
+    turnOffTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params, bool&) {
         (void)params;
         ac.turnOff();
         JsonDocument result;
@@ -111,14 +121,12 @@ void registerACTools(MCPServerBase& server, AirConditioner& ac) {
     setModeTool.inputSchema.required.push_back("mode");
 
     addStatusProperties(setModeTool.outputSchema);
-    setModeTool.outputSchema.properties["error"] =
-        primitive("string", "Present only on failure; explains why the state was not changed");
 
-    setModeTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params) {
+    setModeTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params, bool& isError) {
         if (!params["mode"].is<int>()) {
-            return statusResult(ac, "missing required parameter: mode");
+            return statusResult(ac, "missing required parameter: mode", isError);
         }
-        return statusResult(ac, ac.setMode(params["mode"].as<int>()));
+        return statusResult(ac, ac.setMode(params["mode"].as<int>()), isError);
     });
     server.RegisterTool(setModeTool);
 
@@ -135,14 +143,12 @@ void registerACTools(MCPServerBase& server, AirConditioner& ac) {
     setTempTool.inputSchema.required.push_back("temperature");
 
     addStatusProperties(setTempTool.outputSchema);
-    setTempTool.outputSchema.properties["error"] =
-        primitive("string", "Present only on failure; explains why the state was not changed");
 
-    setTempTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params) {
+    setTempTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params, bool& isError) {
         if (!params["temperature"].is<int>()) {
-            return statusResult(ac, "missing required parameter: temperature");
+            return statusResult(ac, "missing required parameter: temperature", isError);
         }
-        return statusResult(ac, ac.setTemperature(params["temperature"].as<int>()));
+        return statusResult(ac, ac.setTemperature(params["temperature"].as<int>()), isError);
     });
     server.RegisterTool(setTempTool);
 
@@ -154,9 +160,9 @@ void registerACTools(MCPServerBase& server, AirConditioner& ac) {
 
     addStatusProperties(getStatusTool.outputSchema);
 
-    getStatusTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params) {
+    getStatusTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params, bool& isError) {
         (void)params;
-        return statusResult(ac, "");
+        return statusResult(ac, "", isError);
     });
     server.RegisterTool(getStatusTool);
 
@@ -182,7 +188,7 @@ void registerDescriptionTool(MCPServerBase& server, AirConditioner& ac) {
     getDescriptionTool.outputSchema.required.push_back("description");
     getDescriptionTool.outputSchema.required.push_back("alias");
 
-    getDescriptionTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params) {
+    getDescriptionTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params, bool&) {
         (void)params;
         String json = ac.description();
         JsonDocument result;

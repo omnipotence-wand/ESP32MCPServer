@@ -42,6 +42,7 @@ static Properties stringEnum(const String& description, std::initializer_list<co
 
 // getStatus / setMode / setTemperature 共用的设备状态 schema:
 // 设置类工具直接返回调用后的完整状态, 而不是 code/msg 包装。
+// 开关机工具不用这套: 它们只回报本次操作的结果状态, 设备详情由 getStatus 提供。
 // 这里不声明 error: outputSchema 只描述 structuredContent, 而失败结果
 // (isError=true) 不再附带 structuredContent, 失败原因通过 content 文本返回。
 static void addStatusProperties(Properties& schema) {
@@ -69,6 +70,19 @@ static JsonDocument statusResult(AirConditioner& ac, const String& error, bool& 
     return result;
 }
 
+// 开关机结果: 成功时只回报操作后的电源状态, 失败时置起 isError 并把原因放进
+// content 文本(失败结果不带 structuredContent, 所以 error 不写进 outputSchema)。
+static JsonDocument powerResult(bool ok, const char* state, const char* error, bool& isError) {
+    JsonDocument result;
+    isError = !ok;
+    if (isError) {
+        result["error"] = error;
+    } else {
+        result["status"] = state;
+    }
+    return result;
+}
+
 void registerACTools(MCPServerBase& server, AirConditioner& ac) {
     // 1. turnOn Tool
     Tool turnOnTool;
@@ -80,12 +94,9 @@ void registerACTools(MCPServerBase& server, AirConditioner& ac) {
     turnOnTool.outputSchema.properties["status"] = stringEnum("Power state after the call", {"on"});
     turnOnTool.outputSchema.required.push_back("status");
 
-    turnOnTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params, bool&) {
+    turnOnTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params, bool& isError) {
         (void)params;
-        ac.turnOn();
-        JsonDocument result;
-        result["status"] = "on";
-        return result;
+        return powerResult(ac.turnOn(), "on", "failed to turn on the air conditioner", isError);
     });
     server.RegisterTool(turnOnTool);
 
@@ -99,12 +110,9 @@ void registerACTools(MCPServerBase& server, AirConditioner& ac) {
     turnOffTool.outputSchema.properties["status"] = stringEnum("Power state after the call", {"off"});
     turnOffTool.outputSchema.required.push_back("status");
 
-    turnOffTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params, bool&) {
+    turnOffTool.handler = std::make_shared<SimpleToolHandler>([&ac](JsonVariantConst params, bool& isError) {
         (void)params;
-        ac.turnOff();
-        JsonDocument result;
-        result["status"] = "off";
-        return result;
+        return powerResult(ac.turnOff(), "off", "failed to turn off the air conditioner", isError);
     });
     server.RegisterTool(turnOffTool);
 

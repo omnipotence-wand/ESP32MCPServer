@@ -203,6 +203,16 @@ bool MCPService::startWifiTransport() {
     }
 
     registerWifiTools();
+
+    /* 0.4.0 起 HttpMCPServer 构造后不再自动监听: 工具注册完成后显式 begin()，
+     * 避免请求处理与工具注册竞争。 */
+    if (!httpServer->begin()) {
+        Serial.println("[MCP] Failed to start HTTP MCP server");
+        delete httpServer;
+        httpServer = nullptr;
+        return false;
+    }
+
     Serial.printf("[MCP] WiFi MCP started at %s\n", getHttpUrl().c_str());
     return true;
 }

@@ -61,9 +61,6 @@ void setup() {
 
 void loop() {
     // 主循环处理
-    static unsigned long lastLCDUpdate = 0;
-    unsigned long currentTime = millis();
-
     networkManager.loop();
     mcpService.loop();
 
@@ -78,11 +75,9 @@ void loop() {
     }
 
 
-    // 定期更新LCD显示
-    if (currentTime - lastLCDUpdate >= 1000) {  // 每秒更新一次LCD
-        airConditioner.updateLCDDisplay();
-        lastLCDUpdate = currentTime;
-    }
+    /* LCD 只在这里绘制: 每次循环都调用, 由 updateLCDDisplay() 自己决定是走每秒
+     * 一次的常规刷新, 还是兑现 MCP 工具处理器提交的即时刷新请求。 */
+    airConditioner.updateLCDDisplay();
     // 短暂延时，避免CPU占用过高
     delay(100);
 }

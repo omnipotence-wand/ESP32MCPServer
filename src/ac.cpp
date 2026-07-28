@@ -14,6 +14,8 @@ AirConditioner::AirConditioner() {
     isRunning = false;
     lcdEnabled = false;
     lastUpdate = 0;
+    lcdRefreshRequested = false;
+    lcdClearRequested = false;
     wifiState = WIFI_DISP_DISCONNECTED;
     wifiIpPort = "";
     lastDrawnWifiState = -1;
@@ -154,7 +156,7 @@ bool AirConditioner::turnOff() {
     }
     
     isRunning = false;
-    clearLCD();
+    lcdClearRequested.store(true, std::memory_order_relaxed); // 关机后整屏重绘, 清掉开机时的大字温度
     Serial.println("空调已关闭");
     forceLCDUpdate(); // 立即更新LCD显示
     return true;
@@ -295,11 +297,18 @@ void AirConditioner::updateLCDDisplay() {
         return;
     }
     
+    // 其它任务(MCP worker)的状态变更在这里兑现为一次绘制, 保证只有主循环碰SPI
+    const bool forced = lcdRefreshRequested.exchange(false, std::memory_order_relaxed);
+
     unsigned long currentTime = millis();
-    if (currentTime - lastUpdate < UPDATE_INTERVAL) {
+    if (!forced && currentTime - lastUpdate < UPDATE_INTERVAL) {
         return; // 还未到更新时间
     }
-    
+
+    if (lcdClearRequested.exchange(false, std::memory_order_relaxed)) {
+        clearLCD();
+    }
+
     // 文字带背景色绘制, 变长行用 setTextPadding 清除旧内容残留
     // Font7 为七段数码管字体, 仅含数字和冒号, 带字母的行用 Font2/Font4
     lcd.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -390,12 +399,12 @@ bool AirConditioner::isLCDEnabled() const {
     return lcdEnabled;
 }
 
-// 强制更新LCD显示
+// 请求立即刷新LCD。可在任意任务调用: 这里只置位, 绘制由主循环的
+// updateLCDDisplay() 完成, 因此 SPI 总线始终只被一个任务使用。
 void AirConditioner::forceLCDUpdate() {
     if (!lcdEnabled) {
         return;
     }
-    
-    lastUpdate = 0; // 重置更新时间，强制更新
-    updateLCDDisplay();
+
+    lcdRefreshRequested.store(true, std::memory_order_relaxed);
 }

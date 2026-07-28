@@ -3,6 +3,8 @@
 
 #include <Arduino.h>
 
+#include <atomic>
+
 // 空调工作模式枚举
 enum ACMode {
     AC_MODE_AUTO = 0,        // 自动模式
@@ -36,6 +38,14 @@ private:
     bool lcdEnabled;         // LCD是否启用
     unsigned long lastUpdate; // 上次更新时间
     static const unsigned long UPDATE_INTERVAL = 1000; // 更新间隔(ms)
+
+    /* LCD 绘制只允许发生在主循环任务里。LovyanGFX 用 FreeRTOS 互斥量保护 SPI
+     * 总线, 两个任务同时绘制时后结束的那个会在 spiEndTransaction 中 give 一把
+     * 自己没有持有的互斥量, 触发 xQueueGenericSend 断言并复位。MCP 工具处理器
+     * 跑在 ESP-MCP 的 worker 任务上(turnOn/turnOff/setMode/setTemperature 都会
+     * 刷新显示), 因此它们只置位刷新请求, 由主循环完成实际绘制。 */
+    std::atomic<bool> lcdRefreshRequested;  // 请求跳过更新间隔立即重绘
+    std::atomic<bool> lcdClearRequested;    // 请求重绘前先清屏
 
     // 网络状态显示相关
     int wifiState;            // WiFi显示状态 (WiFiDisplayState)
@@ -77,13 +87,13 @@ public:
     // 网络状态显示 (由主循环同步, state 取 WiFiDisplayState, ipPort 形如 "192.168.1.100:9000")
     void setNetworkStatus(int state, const String& ipPort);
 
-    // LCD显示功能
+    // LCD显示功能 (除 forceLCDUpdate 外都会真正驱动SPI, 只能在主循环任务中调用)
     void clearLCD();
     bool initLCD(); // 初始化LCD
     void updateLCDDisplay();            // 更新LCD显示
     void enableLCD(bool enable);        // 启用/禁用LCD
     bool isLCDEnabled() const;          // 检查LCD是否启用
-    void forceLCDUpdate();              // 强制更新LCD显示
+    void forceLCDUpdate();              // 请求立即刷新LCD (可在任意任务调用)
 };
 
 #endif // AC_H

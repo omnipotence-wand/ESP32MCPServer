@@ -34,7 +34,9 @@ void tearDown(void) {
 
 void test_initialize_uses_bootstrap_protocol_response(void) {
     MCPRequest req = server->parseRequest(
-        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})");
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{)"
+        R"("protocolVersion":"2025-11-25","capabilities":{},)"
+        R"("clientInfo":{"name":"test-client","version":"1.0.0"}}})");
     MCPResponse res = server->handle(req);
 
     TEST_ASSERT_EQUAL(200, res.code);
@@ -139,6 +141,21 @@ void test_set_mode_rejected_by_device_reports_tool_error(void) {
     TEST_ASSERT_TRUE(res.result()["structuredContent"].isNull());
 }
 
+// 开关机工具只回报操作结果, 不返回整机状态: 设备详情由 getStatus 提供
+void test_turn_on_reports_power_state_only(void) {
+    AirConditioner ac;
+    registerACTools(*server, ac);
+
+    MCPRequest req = server->parseRequest(
+        R"({"jsonrpc":"2.0","id":"on-1","method":"tools/call","params":{"name":"turnOn","arguments":{}}})");
+    MCPResponse res = server->handle(req);
+
+    TEST_ASSERT_EQUAL(200, res.code);
+    TEST_ASSERT_FALSE(res.result()["isError"].as<bool>());
+    TEST_ASSERT_EQUAL_STRING("on", res.result()["structuredContent"]["status"].as<const char*>());
+    TEST_ASSERT_TRUE(res.result()["structuredContent"]["running"].isNull());
+}
+
 // 成功路径保持原样: isError 为 false, structuredContent 携带设备状态
 void test_get_status_success_has_structured_content_and_no_error(void) {
     AirConditioner ac;
@@ -172,6 +189,7 @@ int runUnityTests() {
     RUN_TEST(test_ac_description_tool_returns_device_metadata);
     RUN_TEST(test_set_mode_missing_argument_reports_tool_error);
     RUN_TEST(test_set_mode_rejected_by_device_reports_tool_error);
+    RUN_TEST(test_turn_on_reports_power_state_only);
     RUN_TEST(test_get_status_success_has_structured_content_and_no_error);
     RUN_TEST(test_initialized_notification_has_no_response_body);
     return UNITY_END();

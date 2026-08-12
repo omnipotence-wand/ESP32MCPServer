@@ -63,6 +63,7 @@ void loop() {
     // 主循环处理
     networkManager.loop();
     mcpService.loop();
+    airConditioner.updateSimulation();
 
     // 同步WiFi状态到LCD (右上角图标 + ip:port 信息行), 状态变化时立即刷新
     if (networkManager.isConnected()) {

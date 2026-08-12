@@ -184,7 +184,11 @@ void MCPService::registerWifiTools() {
         return;
     }
 
+    const uint32_t heapBefore = ESP.getFreeHeap();
     registerACTools(*httpServer, airConditioner);
+    const uint32_t heapAfter = ESP.getFreeHeap();
+    Serial.printf("[MCP] HTTP tool schemas: heap %u -> %u bytes (%u bytes used)\n",
+                  heapBefore, heapAfter, heapBefore - heapAfter);
 }
 
 bool MCPService::startWifiTransport() {

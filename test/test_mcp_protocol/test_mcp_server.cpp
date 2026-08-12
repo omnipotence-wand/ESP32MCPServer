@@ -110,6 +110,22 @@ void test_ac_description_tool_returns_device_metadata(void) {
     TEST_ASSERT_EQUAL_STRING("KFR-35GW/N8XHA1", res.result()["structuredContent"]["model"].as<const char*>());
 }
 
+void test_all_ac_tools_publish_input_and_output_schemas(void) {
+    AirConditioner ac;
+    registerACTools(*server, ac);
+
+    MCPRequest req = server->parseRequest(
+        R"({"jsonrpc":"2.0","id":"schemas-1","method":"tools/list"})");
+    MCPResponse res = server->handle(req);
+    JsonArrayConst tools = res.result()["tools"].as<JsonArrayConst>();
+
+    TEST_ASSERT_EQUAL(17, tools.size());
+    for (JsonObjectConst tool : tools) {
+        TEST_ASSERT_EQUAL_STRING("object", tool["inputSchema"]["type"].as<const char*>());
+        TEST_ASSERT_EQUAL_STRING("object", tool["outputSchema"]["type"].as<const char*>());
+    }
+}
+
 // 工具执行失败必须体现为 MCP result.isError = true, 否则客户端会把带 error
 // 字段的状态当成一次正常调用。失败结果不再附带 structuredContent(它由
 // outputSchema 描述, 只用于成功返回), 失败原因通过 content 文本传达。
@@ -141,8 +157,7 @@ void test_set_mode_rejected_by_device_reports_tool_error(void) {
     TEST_ASSERT_TRUE(res.result()["structuredContent"].isNull());
 }
 
-// 开关机工具只回报操作结果, 不返回整机状态: 设备详情由 getStatus 提供
-void test_turn_on_reports_power_state_only(void) {
+void test_turn_on_returns_compact_acknowledgement(void) {
     AirConditioner ac;
     registerACTools(*server, ac);
 
@@ -152,8 +167,36 @@ void test_turn_on_reports_power_state_only(void) {
 
     TEST_ASSERT_EQUAL(200, res.code);
     TEST_ASSERT_FALSE(res.result()["isError"].as<bool>());
-    TEST_ASSERT_EQUAL_STRING("on", res.result()["structuredContent"]["status"].as<const char*>());
-    TEST_ASSERT_TRUE(res.result()["structuredContent"]["running"].isNull());
+    TEST_ASSERT_TRUE(res.result()["structuredContent"]["success"].as<bool>());
+    TEST_ASSERT_TRUE(res.result()["structuredContent"]["running"].as<bool>());
+    TEST_ASSERT_TRUE(res.result()["structuredContent"]["environment"].isNull());
+}
+
+void test_extended_controls_update_structured_state(void) {
+    AirConditioner ac;
+    registerACTools(*server, ac);
+
+    MCPRequest onReq = server->parseRequest(
+        R"({"jsonrpc":"2.0","id":"on-2","method":"tools/call","params":{"name":"turnOn","arguments":{}}})");
+    server->handle(onReq);
+    MCPRequest fanReq = server->parseRequest(
+        R"({"jsonrpc":"2.0","id":"fan-1","method":"tools/call","params":{"name":"setFanSpeed","arguments":{"speed":"turbo"}}})");
+    MCPResponse fanRes = server->handle(fanReq);
+    TEST_ASSERT_FALSE(fanRes.result()["isError"].as<bool>());
+    TEST_ASSERT_TRUE(fanRes.result()["structuredContent"]["success"].as<bool>());
+
+    MCPRequest swingReq = server->parseRequest(
+        R"({"jsonrpc":"2.0","id":"swing-1","method":"tools/call","params":{"name":"setSwing","arguments":{"vertical":true,"horizontal":true}}})");
+    MCPResponse swingRes = server->handle(swingReq);
+    TEST_ASSERT_TRUE(swingRes.result()["structuredContent"]["success"].as<bool>());
+
+    MCPRequest statusReq = server->parseRequest(
+        R"({"jsonrpc":"2.0","id":"status-2","method":"tools/call","params":{"name":"getStatus","arguments":{}}})");
+    MCPResponse statusRes = server->handle(statusReq);
+    TEST_ASSERT_EQUAL_STRING("turbo", statusRes.result()["structuredContent"]["fanSpeedString"].as<const char*>());
+    TEST_ASSERT_TRUE(statusRes.result()["structuredContent"]["features"]["turbo"].as<bool>());
+    TEST_ASSERT_TRUE(statusRes.result()["structuredContent"]["verticalSwing"].as<bool>());
+    TEST_ASSERT_TRUE(statusRes.result()["structuredContent"]["horizontalSwing"].as<bool>());
 }
 
 // 成功路径保持原样: isError 为 false, structuredContent 携带设备状态
@@ -187,9 +230,11 @@ int runUnityTests() {
     RUN_TEST(test_tools_list_contains_registered_tool_schema);
     RUN_TEST(test_tools_call_returns_text_and_structured_content);
     RUN_TEST(test_ac_description_tool_returns_device_metadata);
+    RUN_TEST(test_all_ac_tools_publish_input_and_output_schemas);
     RUN_TEST(test_set_mode_missing_argument_reports_tool_error);
     RUN_TEST(test_set_mode_rejected_by_device_reports_tool_error);
-    RUN_TEST(test_turn_on_reports_power_state_only);
+    RUN_TEST(test_turn_on_returns_compact_acknowledgement);
+    RUN_TEST(test_extended_controls_update_structured_state);
     RUN_TEST(test_get_status_success_has_structured_content_and_no_error);
     RUN_TEST(test_initialized_notification_has_no_response_body);
     return UNITY_END();

@@ -11,14 +11,11 @@ NetworkManager::NetworkManager() :
 
 void NetworkManager::begin() {
     Serial.println("[Network] Initializing WiFi manager");
-    WiFi.mode(WIFI_STA);
-
-    if (WiFi.SSID().length() == 0) {
-        state = NetworkState::INIT;
-        Serial.println("[Network] No saved WiFi credentials; waiting for BLE configuration");
-        return;
-    }
-
+    // WiFi.SSID() reports the currently associated AP, not the station
+    // credentials saved in NVS. Checking it before WiFi.begin() therefore
+    // makes every reboot look unconfigured and prevents HTTP MCP from coming
+    // back. Let the SDK load and connect with its persisted station config;
+    // BLE configuration remains available if that attempt eventually fails.
     startConnection();
 }
 

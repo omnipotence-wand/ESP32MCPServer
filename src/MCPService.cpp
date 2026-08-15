@@ -13,6 +13,7 @@ constexpr const char* HTTP_SERVER_NAME = "ESP32-AC-MCP-HTTP";
 constexpr const char* SERVER_VERSION = "1.0.0";
 constexpr const char* SERVER_INSTRUCTIONS = "Control the ESP32 air conditioner over MCP.";
 constexpr uint32_t WIFI_TRANSPORT_CHECK_INTERVAL_MS = 3000;
+constexpr uint32_t HEAP_REPORT_INTERVAL_MS = 60000;
 
 // Schema helpers — keep outputSchema declarations readable.
 Properties primitive(const String& type, const String& description) {
@@ -65,14 +66,12 @@ MCPService::MCPService(AirConditioner& airConditioner, NetworkManager& networkMa
       httpServer(nullptr),
       bleStarted(false),
       bleToolsRegistered(false),
-      lastWifiTransportCheck(0) {
+      lastWifiTransportCheck(0),
+      lastHeapReport(0) {
 }
 
 MCPService::~MCPService() {
-    if (httpServer) {
-        delete httpServer;
-        httpServer = nullptr;
-    }
+    delete httpServer.exchange(nullptr, std::memory_order_acq_rel);
 }
 
 void MCPService::begin() {
@@ -82,8 +81,12 @@ void MCPService::begin() {
     bleConfig.deviceName = BLE_SERVER_NAME;
     bleConfig.txPower = ESP_PWR_LVL_P9;
     bleConfig.advTxPower = ESP_PWR_LVL_P9;
-    bleConfig.advMinInterval = 0x20;
-    bleConfig.advMaxInterval = 0x30;
+    /* 100–200 ms。原来是 20–30 ms: WiFi 与 BLE 共用一个 2.4G 射频(软件共存,
+     * BT 控制器和 lwIP 都在 core 0), 广播每 20 ms 抢一次时隙会明显拖慢 WiFi
+     * 关联 —— 而广播只在没有 BLE 连接时才跑, 也就是开机到 HTTP MCP 起来的
+     * 那段窗口。手机扫描是持续若干秒的, 150 ms 的平均发现延迟感知不到。 */
+    bleConfig.advMinInterval = 0xA0;
+    bleConfig.advMaxInterval = 0x140;
     bleServer.setBleConfig(bleConfig);
     bleServer.begin();
     bleStarted = true;
@@ -98,6 +101,14 @@ void MCPService::loop() {
     if (now - lastWifiTransportCheck >= WIFI_TRANSPORT_CHECK_INTERVAL_MS) {
         lastWifiTransportCheck = now;
         ensureWifiTransport();
+    }
+
+    /* BLE + WiFi + 两套工具注册表同时占堆, 而堆见底的表现是 AsyncTCP 静默收
+     * 不下连接。留一条每分钟的水位线, 好把"HTTP 没响应"和堆对上时间。 */
+    if (now - lastHeapReport >= HEAP_REPORT_INTERVAL_MS) {
+        lastHeapReport = now;
+        Serial.printf("[MCP] heap %u bytes, largest free block %u, min free since boot %u\n",
+                      ESP.getFreeHeap(), ESP.getMaxAllocHeap(), ESP.getMinFreeHeap());
     }
 }
 
@@ -179,20 +190,20 @@ void MCPService::registerBleTools() {
     bleToolsRegistered = true;
 }
 
-void MCPService::registerWifiTools() {
-    if (!httpServer) {
-        return;
-    }
-
+void MCPService::registerWifiTools(HttpMCPServer& server) {
     const uint32_t heapBefore = ESP.getFreeHeap();
-    registerACTools(*httpServer, airConditioner);
+    registerACTools(server, airConditioner);
     const uint32_t heapAfter = ESP.getFreeHeap();
-    Serial.printf("[MCP] HTTP tool schemas: heap %u -> %u bytes (%u bytes used)\n",
-                  heapBefore, heapAfter, heapBefore - heapAfter);
+    /* 最大可分配块比剩余总量更能预测 AsyncTCP 收不下新连接: 碎片化之后总量
+     * 还很宽裕, 单块却已经喂不饱一个 PCB + 接收缓冲。 */
+    Serial.printf("[MCP] HTTP tool schemas: heap %u -> %u bytes (%u used), "
+                  "largest free block %u, min free since boot %u\n",
+                  heapBefore, heapAfter, heapBefore - heapAfter,
+                  ESP.getMaxAllocHeap(), ESP.getMinFreeHeap());
 }
 
 bool MCPService::startWifiTransport() {
-    if (httpServer) {
+    if (httpServer.load(std::memory_order_acquire)) {
         return true;
     }
 
@@ -200,29 +211,34 @@ bool MCPService::startWifiTransport() {
         return false;
     }
 
-    httpServer = new (std::nothrow) HttpMCPServer(httpPort, HTTP_SERVER_NAME, SERVER_VERSION, SERVER_INSTRUCTIONS);
-    if (!httpServer) {
+    /* 整个启动过程都在这个局部指针上进行, 直到 /mcp 真正能服务才发布到成员,
+     * 否则 BLE 任务上的 get_wifi_status 会在工具注册的几百毫秒里就报
+     * http_mcp_started: true, 失败路径的 delete 也会与它并发。 */
+    HttpMCPServer* server =
+        new (std::nothrow) HttpMCPServer(httpPort, HTTP_SERVER_NAME, SERVER_VERSION, SERVER_INSTRUCTIONS);
+    if (!server) {
         Serial.println("[MCP] Failed to allocate HTTP MCP server");
         return false;
     }
 
-    registerWifiTools();
+    registerWifiTools(*server);
 
     /* 0.4.0 起 HttpMCPServer 构造后不再自动监听: 工具注册完成后显式 begin()，
      * 避免请求处理与工具注册竞争。 */
-    if (!httpServer->begin()) {
+    if (!server->begin()) {
         Serial.println("[MCP] Failed to start HTTP MCP server");
-        delete httpServer;
-        httpServer = nullptr;
+        delete server;
         return false;
     }
+
+    httpServer.store(server, std::memory_order_release);
 
     Serial.printf("[MCP] WiFi MCP started at %s\n", getHttpUrl().c_str());
     return true;
 }
 
 void MCPService::ensureWifiTransport() {
-    if (!httpServer && WiFi.status() == WL_CONNECTED) {
+    if (!httpServer.load(std::memory_order_acquire) && WiFi.status() == WL_CONNECTED) {
         startWifiTransport();
     }
 }
@@ -267,7 +283,7 @@ JsonDocument MCPService::getWiFiStatus(JsonVariantConst params) const {
     result["ssid"] = connected ? WiFi.SSID() : String("");
     result["ip"] = connected ? ipToString(WiFi.localIP()) : String("");
     result["network_state"] = networkStateToString(networkManager.getState());
-    result["http_mcp_started"] = httpServer != nullptr;
+    result["http_mcp_started"] = httpServer.load(std::memory_order_acquire) != nullptr;
     result["http_url"] = getHttpUrl();
     result["ble_mcp_started"] = bleStarted;
 
@@ -275,7 +291,7 @@ JsonDocument MCPService::getWiFiStatus(JsonVariantConst params) const {
 }
 
 String MCPService::getHttpUrl() const {
-    if (!httpServer || WiFi.status() != WL_CONNECTED) {
+    if (!httpServer.load(std::memory_order_acquire) || WiFi.status() != WL_CONNECTED) {
         return String("");
     }
 

@@ -1,12 +1,18 @@
 #include "NetworkManager.h"
 
+#include <cstring>
+
 NetworkManager::NetworkManager() :
       connectAttempts(0),
       lastConnectAttempt(0),
-      state(NetworkState::INIT),
       requestedSSID(""),
       requestedPassword(""),
-      statusPrinted(false) {
+      statusPrinted(false),
+      state(NetworkState::INIT),
+      pendingLock(portMUX_INITIALIZER_UNLOCKED),
+      pendingRequest(false) {
+    pendingSSID[0] = '\0';
+    pendingPassword[0] = '\0';
 }
 
 void NetworkManager::begin() {
@@ -20,6 +26,8 @@ void NetworkManager::begin() {
 }
 
 void NetworkManager::loop() {
+    applyPendingRequest();
+
     if (state != NetworkState::CONNECTING) {
         if (WiFi.status() == WL_CONNECTED && !statusPrinted) {
             state = NetworkState::CONNECTED;
@@ -54,17 +62,45 @@ void NetworkManager::loop() {
     statusPrinted = true;
 }
 
+/* 由 BLE 任务调用: 只提交请求, 不碰任何主循环拥有的状态。 */
 bool NetworkManager::connect(const String& ssid, const String& password) {
     if (ssid.length() == 0) {
         Serial.println("[Network] Refusing WiFi connection with empty SSID");
         return false;
     }
+    if (ssid.length() > MAX_SSID_LENGTH || password.length() > MAX_PASSWORD_LENGTH) {
+        Serial.println("[Network] Refusing WiFi credentials longer than the 802.11 limits");
+        return false;
+    }
+
+    portENTER_CRITICAL(&pendingLock);
+    strlcpy(pendingSSID, ssid.c_str(), sizeof(pendingSSID));
+    strlcpy(pendingPassword, password.c_str(), sizeof(pendingPassword));
+    portEXIT_CRITICAL(&pendingLock);
+
+    pendingRequest.store(true, std::memory_order_release);
+    /* 让紧接着的 get_wifi_status 立刻看到 connecting, 不必等主循环这一拍。 */
+    state = NetworkState::CONNECTING;
+    return true;
+}
+
+/* 只在主循环任务上运行: 把 BLE 提交的凭据落到 String 上并真正发起连接。 */
+void NetworkManager::applyPendingRequest() {
+    if (!pendingRequest.exchange(false, std::memory_order_acq_rel)) {
+        return;
+    }
+
+    char ssid[MAX_SSID_LENGTH + 1];
+    char password[MAX_PASSWORD_LENGTH + 1];
+    portENTER_CRITICAL(&pendingLock);
+    strlcpy(ssid, pendingSSID, sizeof(ssid));
+    strlcpy(password, pendingPassword, sizeof(password));
+    portEXIT_CRITICAL(&pendingLock);
 
     requestedSSID = ssid;
     requestedPassword = password;
     connectAttempts = 0;
     startConnection(requestedSSID.c_str(), requestedPassword.c_str());
-    return true;
 }
 
 bool NetworkManager::isConnected() const {
